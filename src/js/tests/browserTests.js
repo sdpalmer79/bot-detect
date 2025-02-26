@@ -6,7 +6,12 @@ import {
     checkEmulatedTouchpoints,
     performWebGLRenderingTest,
     detectWebGLBotPatterns,
-    generateWebGLHash
+    generateWebGLHash,
+    checkNavigatorTampering,
+    checkHardwareConsistency,
+    validateBrowserFeatures,
+    checkCrossPropertyConsistency,
+    evaluateNavigatorConsistency
 } from '../common/utils.js';
 
 const TestType = {
@@ -15,33 +20,40 @@ const TestType = {
     HEADLESS_DETECTION: 'headlessDetection',
     AUTOMATION_DETECTION: 'automationDetection',
     WEBGL_FINGERPRINTING: 'webglFingerprinting',
-    CANVAS_FINGERPRINTING: 'canvasFingerprinting',
-    TOUCH_CAPABILITY: 'touchCapability',
-    INTERACTION_BEHAVIOR: 'interactionBehavior',
-    PLUGINS_EVALUATION: 'pluginsEvaluation',
-    HARDWARE_CONCURRENCY: 'hardwareConcurrency',
-    JS_ERROR_HANDLING: 'jsErrorHandling',
-    TIMEZONE_CONSISTENCY: 'timezoneConsistency',
-    PERFORMANCE_METRICS: 'performanceMetrics'
+    //CANVAS_FINGERPRINTING: 'canvasFingerprinting',
+    //TOUCH_CAPABILITY: 'touchCapability',
+    //INTERACTION_BEHAVIOR: 'interactionBehavior',
+    //PLUGINS_EVALUATION: 'pluginsEvaluation',
+    //HARDWARE_CONCURRENCY: 'hardwareConcurrency',
+    //JS_ERROR_HANDLING: 'jsErrorHandling',
+    //TIMEZONE_CONSISTENCY: 'timezoneConsistency',
+    //PERFORMANCE_METRICS: 'performanceMetrics'
 };
 
 /**
- * Checks for inconsistencies in browser navigator properties that indicate automated or spoofed browsers.
+ * Performs a comprehensive analysis of browser navigator properties to detect automated browsers,
+ * emulators, and spoofed environments.
  * 
  * Purpose:
- * Browser automation tools and bots often have inconsistent navigator properties or expose
- * tell-tale signs of automation through their navigator object. Real browsers maintain
- * internal consistency across properties.
+ * This function serves as the main navigator analysis entry point, combining multiple specialized
+ * checks to build a complete profile of the browser environment. It detects inconsistencies
+ * and suspicious patterns that indicate automation or spoofing by examining relationships
+ * between properties that should be consistent in genuine browsers.
  * 
  * Bot characteristics detected:
- * - Webdriver-controlled browsers (Selenium, Puppeteer, Playwright)
- * - User agent spoofing (inconsistent userAgent, appVersion, platform values)
- * - Language inconsistencies (bots often have missing or incorrect language settings)
- * - Missing plugins (headless browsers typically have empty plugin lists)
- * - Browser fingerprint anomalies that don't match the claimed browser identity
+ * - Direct automation indicators (webdriver flag, Selenium objects)
+ * - User agent spoofing and inconsistencies across navigator properties
+ * - Language and locale mismatches or misconfiguration
+ * - Hardware capability inconsistencies (memory/CPU/performance mismatches)
+ * - Browser feature set anomalies (missing expected APIs or having wrong browser features)
+ * - Modified or tampered navigator properties and objects
+ * - Property descriptor modifications (overridden getters/setters)
+ * - Cross-property logical contradictions (geographic/hardware/network inconsistencies)
+ * - Headless browser and emulator signatures
+ * 
  */
 function checkNavigatorConsistency() {
-    // Basic checks from current implementation
+    // Basic checks
     const basicChecks = {
         userAgentData: !!navigator.userAgentData,
         webdriver: !!navigator.webdriver,
@@ -248,12 +260,13 @@ const browserTests = async () => {
     results.testResults.push(await runTest(TestType.HEADLESS_DETECTION, detectHeadlessBrowser));
     results.testResults.push(await runTest(TestType.AUTOMATION_DETECTION, detectAutomationTools));
     results.testResults.push(await runTest(TestType.WEBGL_FINGERPRINTING, checkWebGLFingerprint));
-    results.testResults.push(await runTest(TestType.CANVAS_FINGERPRINTING, checkCanvasFingerprint));
-    results.testResults.push(await runTest(TestType.TOUCH_CAPABILITY, verifyTouchCapability));
-    results.testResults.push(await runTest(TestType.PLUGINS_EVALUATION, evaluatePlugins));
-    results.testResults.push(await runTest(TestType.HARDWARE_CONCURRENCY, checkHardwareConcurrency));
-    results.testResults.push(await runTest(TestType.TIMEZONE_CONSISTENCY, checkTimezoneConsistency));
-    results.testResults.push(await runTest(TestType.PERFORMANCE_METRICS, collectPerformanceMetrics));
+    //results.testResults.push(await runTest(TestType.CANVAS_FINGERPRINTING, checkCanvasFingerprint));
+    //results.testResults.push(await runTest(TestType.TOUCH_CAPABILITY, verifyTouchCapability));
+    //INTERACTION_BEHAVIOR
+    //results.testResults.push(await runTest(TestType.PLUGINS_EVALUATION, evaluatePlugins));
+    //results.testResults.push(await runTest(TestType.HARDWARE_CONCURRENCY, checkHardwareConcurrency));
+    //results.testResults.push(await runTest(TestType.TIMEZONE_CONSISTENCY, checkTimezoneConsistency));
+    //results.testResults.push(await runTest(TestType.PERFORMANCE_METRICS, collectPerformanceMetrics));
     
     return results;
 }
