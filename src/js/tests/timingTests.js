@@ -1,8 +1,8 @@
 const TestType = {
-    JAVASCRIPT_EXECUTION_SPEED: 'JavaScript Execution Speed',
-    TIMING_CONSISTENCY: 'Timing Consistency',
-    EVENT_LOOP_LATENCY: 'Event Loop Latency',
-    MEMORY_PERFORMANCE: 'Memory Performance'
+    JAVASCRIPT_EXECUTION_SPEED: 'javaScriptExecutionSpeed',
+    TIMING_CONSISTENCY: 'timingConsistency',
+    EVENT_LOOP_LATENCY: 'eventLoopLatency',
+    MEMORY_PERFORMANCE: 'memoryPerformance'
 };
 
 /**
@@ -13,7 +13,7 @@ const TestType = {
  * custom JavaScript engines) or extremely slow execution (certain automation tools).
  * Bots often have either much faster or much slower execution than standard browsers.
  */
-function JavaScriptExecutionSpeed() {
+function checkJavaScriptExecutionSpeed() {
     const executionTimes = [];
     const iterations = 100000;
     const runs = 5;
@@ -47,7 +47,7 @@ function JavaScriptExecutionSpeed() {
  * processes, whereas bots and automated testing tools often display
  * suspiciously consistent timing patterns.
  */
-function TimingConsistency() {
+function checkTimingConsistency() {
     const timings = [];
     for (let i = 0; i < 5; i++) {
         const start = performance.now();
@@ -79,7 +79,7 @@ function TimingConsistency() {
  * show different event loop timing patterns compared to standard browsers.
  * Some bots attempt to control or modify the timing API to evade detection.
  */
-async function EventLoopLatency() {
+async function checkEventLoopLatency() {
     const delays = [];
     let iterations = 10;
     let expectedTime = performance.now() + 50;
@@ -113,7 +113,7 @@ async function EventLoopLatency() {
  * standard browsers. Some bots run with constrained memory resources
  * or in virtualized environments that affect allocation performance.
  */
-function MemoryPerformance() {
+function checkMemoryPerformance() {
     const memoryTimes = [];
     const memoryIterations = 10; // Number of memory allocation/deallocation cycles
 
@@ -139,39 +139,15 @@ async function runTest(testType, testFn) {
     return testResult;
 }
 
-const timingTests = async () => {
+export const timingTests = async () => {
     const results = {
         supportsCaptcha: true,
         testResults: []
     };
 
-    // Test 1: JavaScript Execution Speed
-    results.testResults.push(
-        await runTest(
-            TestType.JAVASCRIPT_EXECUTION_SPEED, 
-            JavaScriptExecutionSpeed
-        ));
-    
-    // Test 2: Timing Consistency
-    results.testResults.push(
-        await runTest(
-            TestType.TIMING_CONSISTENCY,
-            TimingConsistency
-        ));
-
-    // Test 3: Event Loop Latency
-    results.testResults.push(
-        await runTest(
-            TestType.EVENT_LOOP_LATENCY,
-            EventLoopLatency
-        ));
-
-    // Test 4: Memory Performance
-    results.testResults.push(
-        await runTest(
-            TestType.MEMORY_PERFORMANCE,
-            MemoryPerformance
-        ));
-
+    results.testResults.push(await runTest(TestType.JAVASCRIPT_EXECUTION_SPEED, checkJavaScriptExecutionSpeed));
+    results.testResults.push(await runTest(TestType.TIMING_CONSISTENCY, checkTimingConsistency));
+    results.testResults.push(await runTest(TestType.EVENT_LOOP_LATENCY, checkEventLoopLatency));
+    results.testResults.push(await runTest(TestType.MEMORY_PERFORMANCE, checkMemoryPerformance));
     return results;
 }
