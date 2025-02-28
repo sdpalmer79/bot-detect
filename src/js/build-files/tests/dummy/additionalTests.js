@@ -73,7 +73,7 @@ function checkDataCenterPatterns() {
     };
 }
 
-export default function runAdditionalChecks() {
+export default async function runAdditionalChecks() {
     const startTime = performance.now();
     
     const testsToRun = [];

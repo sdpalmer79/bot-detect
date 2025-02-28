@@ -576,7 +576,7 @@ export function performWebGLRenderingTest(gl) {
     };
 }
 
-function detectWebGLBotPatterns(parameters, extensions) {
+export function detectWebGLBotPatterns(parameters, extensions) {
     // Initialize results object
     const results = {
         suspiciousRenderer: false,

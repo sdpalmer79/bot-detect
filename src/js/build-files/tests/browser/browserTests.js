@@ -1,18 +1,18 @@
 import { 
     checkUserAgentConsistency, 
-    checkLanguagesConsistency, 
+    checkLanguagesConsistency,
+    checkNavigatorTampering,
+    checkHardwareConsistency,
+    validateBrowserFeatures,
+    checkCrossPropertyConsistency,
+    evaluateNavigatorConsistency,
     checkWindowOuterDimensions, 
     checkForNodeObjects,
     checkEmulatedTouchpoints,
     performWebGLRenderingTest,
     detectWebGLBotPatterns,
-    generateWebGLHash,
-    checkNavigatorTampering,
-    checkHardwareConsistency,
-    validateBrowserFeatures,
-    checkCrossPropertyConsistency,
-    evaluateNavigatorConsistency
-} from '../common/utils.js';
+    generateWebGLHash
+} from '../../common/utils.js';
 
 const TestType = {
     BROWSER_FINGERPRINT: 'browserFingerprint',
@@ -249,7 +249,7 @@ async function runTest(testType, testFn) {
     return testResult;
 }
 
-const browserTests = async () => {
+export const browserTests = async () => {
     const results = {
         supportsCaptcha: true,
         testResults: []
