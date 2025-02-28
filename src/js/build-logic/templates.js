@@ -403,3 +403,23 @@ export const environmentTests = {
     }
   ]
 };
+
+export const interactionTests = {
+  variations: []
+}
+
+export const networkTests = {
+  variations: []
+}
+
+export const inputBehaviorTests = {
+  variations: []
+}
+
+export const deviceIntegrityTests = {
+  variations: []
+}
+
+export const automationTests = {
+  variations: []
+}
