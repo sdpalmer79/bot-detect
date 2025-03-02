@@ -83,103 +83,80 @@
     /**
      * Runs the proof of work algorithm to establish initial chain hash
      */
-    async function runProofOfWork(challenge) {
-      updateStatus("Starting verification process...");
-      
-      try {
-        const { powDifficulty, powPrefix } = challenge;
-        
-        // Create environment data that will be part of the proof of work
-        const environmentData = {
-          userAgent: navigator.userAgent,
-          language: navigator.language,
-          screenDimensions: `${window.screen.width}x${window.screen.height}`,
-          devicePixelRatio: window.devicePixelRatio,
-          hardwareConcurrency: navigator.hardwareConcurrency || 0,
-          deviceMemory: navigator.deviceMemory || 0
-        };
-        
-        // Start timing for proof of work
-        const startTime = performance.now();
-        
-        // Run the actual proof of work calculation
-        const result = await findProofOfWork(powDifficulty, powPrefix, environmentData);
-        
-        // Record execution time
-        result.executionTime = performance.now() - startTime;
-        
-        updateStatus("Initial verification step complete...");
-        return result;
-      } catch (error) {
-        console.error("Proof of work error:", error);
-        throw new Error("Failed to complete initial verification step");
-      }
-    }
-    
-    /**
-     * Proof of Work implementation
-     * Finds a nonce that, when hashed with the prefix and environment data,
-     * produces a hash with the required number of leading zeros
-     */
-    async function findProofOfWork(difficulty, prefix, environmentData) {
-      try {
+    async function findProofOfWork(difficulty, prefix, timestamp, token) {
+        try {
         // Target pattern: required number of leading zeros
         const targetPattern = new RegExp(`^${'0'.repeat(difficulty)}`);
         
-        // Create a string representation of critical environment data
-        const envString = JSON.stringify(environmentData);
-        
-        // Combine prefix with environment data to make the puzzle environment-specific
-        const baseString = prefix + envString;
+        // Base string includes timestamp and token
+        const baseString = prefix + timestamp + token;
         
         // Start searching for a solution
         let nonce = 0;
         let hash = '';
         const startTime = performance.now();
         
-        // Keep trying different nonce values until we find one that works
         while (true) {
-          // Check if we've been searching too long
-          if (performance.now() - startTime > 10000) {
-            // Prevent excessive computation - limit to 10 seconds
-            return {
-              nonce: nonce,
-              hash: hash,
-              solved: false,
-              timeSpent: performance.now() - startTime,
-              attemptsCount: nonce
-            };
-          }
-          
-          // Try a new nonce
-          hash = await sha256(baseString + nonce);
-          
-          // Check if this hash meets our difficulty requirement
-          if (targetPattern.test(hash)) {
-            // Found a solution!
-            return {
-              nonce: nonce,
-              hash: hash,
-              solved: true,
-              timeSpent: performance.now() - startTime,
-              attemptsCount: nonce
-            };
-          }
-          
-          nonce++;
-          
-          // Update progress occasionally
-          if (nonce % 1000 === 0) {
-            updateStatus(`Verification in progress... (${(performance.now() - startTime).toFixed(0)}ms)`);
-          }
+            // Check if we've been searching too long
+            if (performance.now() - startTime > 10000) {
+                // Prevent excessive computation - limit to 10 seconds
+                return {
+                    nonce: nonce,
+                    hash: hash,
+                    solved: false,
+                    timeSpent: performance.now() - startTime,
+                    attemptsCount: nonce,
+                };
+            }
+            
+            // Try a new nonce
+            hash = await sha256(baseString + nonce);
+            
+            // Check if this hash meets our difficulty requirement
+            if (targetPattern.test(hash)) {
+                // Found a solution!
+                return {
+                    nonce: nonce,
+                    hash: hash,
+                    solved: true,
+                    timeSpent: performance.now() - startTime,
+                    attemptsCount: nonce
+                };
+            }
+            nonce++;
+            
+            // Update progress occasionally
+            if (nonce % 1000 === 0) {
+                updateStatus(`Verification in progress... (${(performance.now() - startTime).toFixed(0)}ms)`);
+            }
         }
-      } catch (error) {
-        console.error("Error in proof of work:", error);
-        return {
-          error: "Computation failed", 
-          solved: false
-        };
-      }
+        } catch (error) {
+            console.error("Error in proof of work:", error);
+            return {
+                error: "Computation failed", 
+                solved: false,
+            };
+        }
+    }
+    
+    /**
+     * Runs the proof of work algorithm to establish initial chain hash
+     */
+    async function runProofOfWork(challenge) {
+        updateStatus("Starting verification process...");
+        
+        try {
+            const { powDifficulty, powPrefix, timestamp } = challenge;
+            
+            // Run the proof of work calculation
+            const result = await findProofOfWork(powDifficulty, powPrefix, timestamp, securityToken);
+            updateStatus("Initial verification step complete...");
+            return result;
+            
+        } catch (error) {
+            console.error("Proof of work error:", error);
+            throw new Error("Failed to complete initial verification step");
+        }
     }
     
     /**

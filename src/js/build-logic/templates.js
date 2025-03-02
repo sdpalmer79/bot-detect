@@ -133,8 +133,6 @@ export const webglTests = {
           };
         }
       `,
-      // No external dependencies needed anymore
-      dependencies: [],
       paramRanges: {
         PARAM_WIDTH: [256, 512, 1024],
         PARAM_HEIGHT: [256, 512, 1024],
@@ -225,7 +223,6 @@ export const webglTests = {
           }
         }
       `,
-      dependencies: [],
       paramRanges: {} // No replaceable parameters
     }
   ]

@@ -504,6 +504,65 @@ function shuffleTests(tests, seed) {
     return finalTestSequence;
   }
   
+/**
+ * Generates parameter values for a test based on its paramRanges and a seed
+ * @param {Object} test - Test object containing paramRanges
+ * @param {string} seed - Seed for deterministic parameter generation
+ * @return {Object} - Object mapping parameter names to values
+ */
+function generateTestParams(test, seed) {
+    // If test has no parameter ranges, return empty object
+    if (!test.paramRanges) {
+      return {};
+    }
+    
+    // Create a deterministic random number generator
+    const seedInt = parseInt(seed.substring(0, 8), 16);
+    const rng = new PseudoRandom(seedInt);
+    
+    const paramValues = {};
+    
+    // Process each parameter in the ranges
+    Object.entries(test.paramRanges).forEach(([paramName, range]) => {
+      // Handle different parameter types
+      if (Array.isArray(range)) {
+        // Parameter is an array of possible values - select one randomly
+        const index = Math.floor(rng.next() * range.length);
+        paramValues[paramName] = range[index];
+      } else if (range === "DYNAMIC") {
+        // Generate a dynamic value based on seed
+        // Here we create a large random number between 10000-99999
+        paramValues[paramName] = 10000 + Math.floor(rng.next() * 90000);
+      } else if (typeof range === 'object' && range !== null) {
+        // Handle range object with min/max/step values
+        const { min, max, step = 1 } = range;
+        const steps = Math.floor((max - min) / step) + 1;
+        const value = min + (Math.floor(rng.next() * steps) * step);
+        paramValues[paramName] = value;
+      } else if (typeof range === 'number') {
+        // If the parameter is just a single number, use it directly
+        paramValues[paramName] = range;
+      } else if (typeof range === 'string') {
+        // String constant
+        paramValues[paramName] = range;
+      } else {
+        // Default case - generate a random number between 0-999
+        paramValues[paramName] = Math.floor(rng.next() * 1000);
+      }
+    });
+    
+    // Add additional entropy params that can be used for uniqueness
+    paramValues['PARAM_UNIQUE_ID'] = crypto.createHash('sha256')
+      .update(seed)
+      .digest('hex')
+      .substring(0, 16);
+    
+    // Add timestamp-based parameter (changes on each build but remains constant in a bundle)
+    paramValues['PARAM_TIMESTAMP'] = Date.now();
+    
+    return paramValues;
+}
+
 function createTestChain(testOrder, seed) {
   const chainedTests = [];
   let previousTestId = null;
@@ -532,40 +591,6 @@ function createTestChain(testOrder, seed) {
   return chainedTests;
 }
 
-function assembleBundleCode(chainedTests, bundleSeed) {
-  // Begin with core imports and initialization code
-  let bundleCode = `
-// Automatically generated CAPTCHA bundle
-// Bundle ID: ${bundleSeed}
-// Generated: ${new Date().toISOString()}
-
-// Test implementation
-const testImplementations = {
-${generateTestFunctions(chainedTests)}
-};
-
-// Test runner that enforces chaining
-${generateChainedTestRunner(chainedTests)}
-
-// Initialize CaptchaSystem
-window.CaptchaSystem = {
-  initialize: function(challenge) {
-    console.log("Initializing verification with challenge:", challenge.id);
-    return runTests({
-      challenge: challenge,
-      startTime: performance.now()
-    });
-  },
-  getTestOrder: function() {
-    return [${chainedTests.map(test => `"${test.id}"`).join(', ')}];
-  },
-  tests: testImplementations
-};
-`;
-
-  return bundleCode;
-}
-
 function generateTestFunctions(chainedTests) {
   return chainedTests.map(test => {
     // Replace parameter placeholders with actual values
@@ -580,6 +605,106 @@ function generateTestFunctions(chainedTests) {
     // Add function to the test implementations object
     return `  "${test.id}": ${code}`;
   }).join(',\n\n');
+}
+
+/**
+ * Generates code for executing tests in a chain, with centralized result hashing
+ * @param {Array<Object>} chainedTests - Array of chained tests
+ * @return {string} - Generated JavaScript code for test execution chain
+ */
+function generateTestExecutionChain(chainedTests) {
+  // First add the hashTestResult function that will be used by all tests
+  const hashingFunction = `
+// Centralized test result hashing function
+async function hashTestResult(testResult, previousHash, testId) {
+  try {
+    // Create deterministic JSON string (sorted keys)
+    const resultStr = JSON.stringify(testResult, Object.keys(testResult).sort()) + previousHash;
+    
+    // Use testId as a seed to select algorithm variant (ensures diversity while being deterministic)
+    const algorithmSelector = parseInt(testId.substring(testId.length - 4), 16) % 4;
+    
+    // Select hashing method based on environment and algorithm selector
+    if (typeof crypto !== 'undefined' && crypto.subtle && algorithmSelector < 2) {
+      // Use SubtleCrypto for more robust hashing when available
+      const encoder = new TextEncoder();
+      const buffer = encoder.encode(resultStr);
+      
+      // Use different hashing algorithms based on selector
+      const algorithm = ['SHA-256', 'SHA-1'][algorithmSelector];
+      const hashBuffer = await crypto.subtle.digest(algorithm, buffer);
+      return Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+    } else {
+      // Fallback to pure JS implementations with different algorithms
+      let hash = 0;
+      
+      // Select from different JS hash implementations
+      switch(algorithmSelector) {
+        case 0: // djb2 hash
+          hash = 5381;
+          for (let i = 0; i < resultStr.length; i++) {
+            hash = ((hash << 5) + hash) + resultStr.charCodeAt(i);
+          }
+          break;
+          
+        case 1: // fnv-1a hash
+          hash = 2166136261;
+          for (let i = 0; i < resultStr.length; i++) {
+            hash ^= resultStr.charCodeAt(i);
+            hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+          }
+          break;
+          
+        case 2: // sdbm hash
+          hash = 0;
+          for (let i = 0; i < resultStr.length; i++) {
+            hash = resultStr.charCodeAt(i) + (hash << 6) + (hash << 16) - hash;
+          }
+          break;
+          
+        default: // jenkins one-at-a-time hash
+          hash = 0;
+          for (let i = 0; i < resultStr.length; i++) {
+            hash += resultStr.charCodeAt(i);
+            hash += (hash << 10);
+            hash ^= (hash >>> 6);
+          }
+          hash += (hash << 3);
+          hash ^= (hash >>> 11);
+          hash += (hash << 15);
+      }
+      
+      return Math.abs(hash >>> 0).toString(16).padStart(8, '0');
+    }
+  } catch (error) {
+    console.error("Error hashing test result:", error);
+    
+    // Ultra simple fallback for environments with issues
+    let hash = 0;
+    for (let i = 0; i < resultStr.length; i++) {
+      hash = ((hash << 5) - hash) + resultStr.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash).toString(16).padStart(8, '0');
+  }
+}`;
+
+  // Generate test execution code
+  const executionCode = chainedTests.map(test => `
+// Execute test: ${test.originalId} (${test.id})
+console.log("Running test ${test.id}");
+const ${test.id}_result = await testImplementations["${test.id}"](testContext, { previousHash });
+results["${test.id}"] = ${test.id}_result;
+
+// Hash result with previous hash using centralized hashing function
+previousHash = await hashTestResult(${test.id}_result, previousHash, "${test.id}");
+console.log("Updated hash: " + previousHash.substring(0, 8) + "...");
+  `).join('\n');
+  
+  // Combine the hashing function and execution code
+  return hashingFunction + '\n' + executionCode;
 }
 
 function generateChainedTestRunner(chainedTests) {
@@ -606,38 +731,34 @@ async function runChainedTests(testContext) {
 }`;
 }
 
-function generateTestExecutionChain(chainedTests) {
-  return chainedTests.map(test => `
-    // Execute test: ${test.originalId} (${test.id})
-    console.log("Running test ${test.id}");
-    const ${test.id}_result = await testImplementations["${test.id}"](testContext, { previousHash });
-    results["${test.id}"] = ${test.id}_result;
-    
-    // Hash result with previous hash - using the test's own hash function if available
-    if (testImplementations["${test.id}"].hashResult) {
-      previousHash = await testImplementations["${test.id}"].hashResult(${test.id}_result, previousHash);
-    } else {
-      // Fallback inline hashing if the test doesn't provide a hash function
-      const resultStr = JSON.stringify(${test.id}_result) + previousHash;
-      try {
-        const encoder = new TextEncoder();
-        const buffer = encoder.encode(resultStr);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-        previousHash = Array.from(new Uint8Array(hashBuffer))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('');
-      } catch (e) {
-        // Ultra simple fallback
-        let hash = 0;
-        for (let i = 0; i < resultStr.length; i++) {
-          hash = ((hash << 5) - hash) + resultStr.charCodeAt(i);
-          hash |= 0;
-        }
-        previousHash = Math.abs(hash).toString(16).padStart(8, '0');
-      }
-    }
-    console.log("Updated hash: " + previousHash.substring(0, 8) + "...");
-  `).join('\n');
+function assembleBundleCode(chainedTests, bundleSeed) {
+  // Begin with core imports and initialization code
+  let bundleCode = `
+// Automatically generated CAPTCHA bundle
+// Bundle ID: ${bundleSeed}
+// Generated: ${new Date().toISOString()}
+
+// Test implementation
+const testImplementations = {
+${generateTestFunctions(chainedTests)}
+};
+
+// Test runner that enforces chaining
+${generateChainedTestRunner(chainedTests)}
+
+// Initialize CaptchaSystem
+window.CaptchaSystem = {
+  verify: function(challenge) {
+    console.log("Initializing verification with challenge:", challenge.id);
+    return runChainedTests({
+      challenge: challenge,
+      startTime: performance.now()
+    });
+  }
+};
+`;
+
+  return bundleCode;
 }
 
 function generateUniqueBundle(bundleId) {
