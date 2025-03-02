@@ -11,34 +11,29 @@
     
     async function initCaptcha() {
       try {
-        // Request a challenge from server with token
+        // Request challenge from server
         const challenge = await requestChallenge();
-        captchaChallenge = challenge;
         
-        // Create container for CAPTCHA UI
+        // Create UI container
         createCaptchaContainer();
         
-        // Load the specific bundle for this challenge
+        // Load the bundle
         await loadCaptchaBundle(challenge.bundleUrl);
         
-        // Initialize the test execution process
-        if (window.CaptchaSystem && window.CaptchaSystem.initialize) {
-          // Run proof of work first to establish chain
-          const powResult = await runProofOfWork(challenge);
+        // Let the bundle handle EVERYTHING related to verification
+        if (window.CaptchaSystem && window.CaptchaSystem.verify) {
+          updateStatus("Starting verification process...");
           
-          // Set initial hash from proof of work
-          currentChainHash = powResult.hash;
-          testResults.push({ type: 'pow', result: powResult });
+          // Single call that handles the entire verification process
+          const verificationResults = await window.CaptchaSystem.verify(challenge);
           
-          // Execute the bundle's tests with chained hashes
-          await executeTestsSequentially(challenge);
+          // Submit results
+          await submitCaptchaResults(verificationResults);
         } else {
-          console.error("CAPTCHA bundle failed to initialize properly");
-          showError("Verification system failed to load. Please try again.");
+          showError("Verification system failed to load.");
         }
       } catch (error) {
-        console.error("Failed to initialize CAPTCHA:", error);
-        showError("Verification failed. Please refresh and try again.");
+        showError("Verification failed. Please try again.");
       }
     }
     
@@ -189,60 +184,6 @@
         hash = hash & hash; // Convert to 32bit integer
       }
       return Math.abs(hash).toString(16).padStart(8, '0');
-    }
-    
-    /**
-     * Executes all tests from the loaded bundle sequentially
-     * Each test receives the hash of the previous test's result
-     */
-    async function executeTestsSequentially(challenge) {
-      if (!window.CaptchaSystem || !window.CaptchaSystem.tests) {
-        throw new Error("Test bundle not properly initialized");
-      }
-      
-      updateStatus("Running security checks...");
-      
-      const testContext = {
-        challenge: challenge,
-        startTime: performance.now(),
-        initialHash: currentChainHash
-      };
-      
-      try {
-        // Get the ordered list of tests to run from the bundle
-        const testOrder = window.CaptchaSystem.getTestOrder();
-        
-        // Run each test in sequence
-        for (let i = 0; i < testOrder.length; i++) {
-          const testId = testOrder[i];
-          const testFunction = window.CaptchaSystem.tests[testId];
-          
-          if (typeof testFunction !== 'function') {
-            throw new Error(`Test ${testId} is not a valid function`);
-          }
-          
-          updateStatus(`Verification step ${i+1}/${testOrder.length}`);
-          
-          // Execute the test with the current chain hash
-          const testResult = await testFunction(testContext, { previousHash: currentChainHash });
-          
-          // Add result to our collection
-          testResults.push({
-            testId,
-            result: testResult
-          });
-          
-          // Update the chain hash
-          currentChainHash = await sha256(JSON.stringify(testResult) + currentChainHash);
-        }
-        
-        // All tests completed, submit results
-        await submitCaptchaResults();
-        
-      } catch (error) {
-        console.error("Error executing tests:", error);
-        showError("Verification process failed. Please try again.");
-      }
     }
     
     /**

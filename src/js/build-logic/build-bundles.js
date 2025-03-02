@@ -1,4 +1,4 @@
-const { generateUniqueBundle } = require('./challenge-assembler');
+const { generateUniqueBundle } = require('./assembler');
 const { obfuscateBundle } = require('./obfuscator');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
