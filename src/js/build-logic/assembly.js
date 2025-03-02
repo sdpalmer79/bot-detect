@@ -211,7 +211,299 @@ function selectTests(seed, templates) {
     
     return [...coreTests, ...dummyTests];
 }
+  
+  /**
+ * Orders real tests respecting dependencies between tests and resource usage
+ * @param {Array<Object>} realTests - Array of real tests
+ * @param {PseudoRandom} rng - Random number generator
+ * @return {Array<Object>} - Ordered array of real tests
+ */
+function orderRealTestsWithDependencies(realTests, rng) {
+    // If there are only a few tests, we can just shuffle them all
+    // since we don't have strong dependencies
+    if (realTests.length <= 3) {
+      const shuffled = [...realTests];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(rng.next() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
+    }
+    
+    // For more complex test sets, categorize tests by type
+    
+    // Core tests that establish environment and capabilities
+    const fingerprintTests = realTests.filter(test => 
+      test.id.includes('fingerprint') || 
+      test.originalId?.includes('fingerprint') ||
+      test.id.startsWith('environment_') || 
+      test.originalId?.startsWith('environment_')
+    );
+    
+    // Hardware capability tests
+    const webGLTests = realTests.filter(test => 
+      test.id.startsWith('webgl_') || 
+      test.originalId?.startsWith('webgl_')
+    );
+    
+    // Performance measurement tests
+    const timingTests = realTests.filter(test => 
+      test.id.startsWith('timing_') || 
+      test.originalId?.startsWith('timing_')
+    );
+    
+    // Security environment tests
+    const deviceIntegrityTests = realTests.filter(test =>
+      test.id.startsWith('integrity_') ||
+      test.originalId?.startsWith('integrity_') ||
+      test.id.includes('device') ||
+      test.originalId?.includes('device')
+    );
+    
+    // Network behavior tests
+    const networkTests = realTests.filter(test =>
+      test.id.startsWith('network_') ||
+      test.originalId?.startsWith('network_')
+    );
+    
+    // Automation detection tests
+    const automationTests = realTests.filter(test =>
+      test.id.startsWith('automation_') ||
+      test.originalId?.startsWith('automation_')
+    );
+    
+    // Interactive behavior tests
+    const interactionTests = realTests.filter(test =>
+      test.id.startsWith('interaction_') ||
+      test.originalId?.startsWith('interaction_')
+    );
+    
+    // Input behavior tests
+    const inputTests = realTests.filter(test =>
+      test.id.startsWith('input_') ||
+      test.originalId?.startsWith('input_')
+    );
+    
+    // Any tests that don't fit the defined categories
+    const otherTests = realTests.filter(test => 
+      !webGLTests.includes(test) && 
+      !fingerprintTests.includes(test) && 
+      !timingTests.includes(test) &&
+      !deviceIntegrityTests.includes(test) &&
+      !networkTests.includes(test) &&
+      !automationTests.includes(test) &&
+      !interactionTests.includes(test) &&
+      !inputTests.includes(test)
+    );
+    
+    // Create ordered test sequence with optimal dependencies
+    const orderedTests = [];
+    
+    // PHASE 1: Environment baseline - start with tests that establish what we're working with
+    
+    // 1. Start with fingerprint/environment test to establish browser identity
+    if (fingerprintTests.length > 0) {
+      orderedTests.push(fingerprintTests[0]);
+      fingerprintTests.splice(0, 1);
+    }
+    
+    // 2. Add a device integrity test early to detect compromised environments
+    if (deviceIntegrityTests.length > 0) {
+      orderedTests.push(deviceIntegrityTests[0]);
+      deviceIntegrityTests.splice(0, 1);
+    }
+    
+    // 3. Add one WebGL test early to establish hardware capability
+    if (webGLTests.length > 0) {
+      orderedTests.push(webGLTests[0]);
+      webGLTests.splice(0, 1);
+    }
+    
+    // 4. Add one timing test to establish performance baseline
+    if (timingTests.length > 0) {
+      orderedTests.push(timingTests[0]);
+      timingTests.splice(0, 1);
+    }
+    
+    // PHASE 2: Create pools of remaining tests to intersperse
+    
+    // First pool: Tests that are resource-intensive and should be spaced out
+    const resourceIntensiveTests = [
+      ...webGLTests,
+      ...networkTests
+    ];
+    
+    // Second pool: Tests that provide additional security signals
+    const securityTests = [
+      ...deviceIntegrityTests,
+      ...automationTests
+    ];
+    
+    // Third pool: Tests that measure user behavior
+    const behaviorTests = [
+      ...interactionTests,
+      ...inputTests
+    ];
+    
+    // Final pool: Remaining tests to fill gaps
+    const remainingTests = [
+      ...fingerprintTests,
+      ...timingTests,
+      ...otherTests
+    ];
+    
+    // Shuffle each pool with seeded randomness for unpredictability
+    function shufflePool(pool) {
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(rng.next() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      return pool;
+    }
+    
+    shufflePool(resourceIntensiveTests);
+    shufflePool(securityTests);
+    shufflePool(behaviorTests);
+    shufflePool(remainingTests);
+    
+    // PHASE 3: Intersperse tests from different pools to create balanced sequence
+    
+    // Calculate how to distribute tests (aim for even distribution)
+    const totalRemaining = resourceIntensiveTests.length + 
+                           securityTests.length +
+                           behaviorTests.length + 
+                           remainingTests.length;
+    
+    if (totalRemaining === 0) {
+      return orderedTests; // Return what we have if no more tests
+    }
+    
+    // Calculate rough spacing between similar test types
+    const approximateGap = Math.max(1, Math.ceil(totalRemaining / 4));
+    
+    // Build the sequence by alternating between pools
+    while (resourceIntensiveTests.length > 0 || 
+           securityTests.length > 0 || 
+           behaviorTests.length > 0 || 
+           remainingTests.length > 0) {
+      
+      // Add a resource intensive test if available (but not consecutive ones)
+      if (resourceIntensiveTests.length > 0 && 
+          (orderedTests.length === 0 || 
+          !resourceIntensiveTests.includes(orderedTests[orderedTests.length - 1]))) {
+        orderedTests.push(resourceIntensiveTests.shift());
+      }
+      
+      // Add a security test if available
+      if (securityTests.length > 0) {
+        orderedTests.push(securityTests.shift());
+      }
+      
+      // Add behavior tests in small groups (they often work together)
+      const behaviorTestsToAdd = Math.min(
+        behaviorTests.length,
+        1 + Math.floor(rng.next() * 2) // Add 1-2 behavior tests in sequence
+      );
+      
+      for (let i = 0; i < behaviorTestsToAdd; i++) {
+        orderedTests.push(behaviorTests.shift());
+      }
+      
+      // Fill with remaining tests
+      if (remainingTests.length > 0) {
+        orderedTests.push(remainingTests.shift());
+      }
+    }
+    
+    return orderedTests;
+  }
 
+/**
+ * Shuffles the order of tests in a deterministic way based on seed
+ * Ensures critical test dependencies are maintained while randomizing order
+ * 
+ * @param {Array<Object>} tests - Array of selected tests
+ * @param {string} seed - Random seed for shuffling
+ * @return {Array<Object>} - Shuffled test array
+ */
+function shuffleTests(tests, seed) {
+    // Create a seeded random number generator
+    const seedInt = parseInt(seed.substring(0, 8), 16);
+    const rng = new PseudoRandom(seedInt);
+    
+    // First, separate real tests and dummy tests
+    const realTests = tests.filter(test => test.isRealTest);
+    const dummyTests = tests.filter(test => !test.isRealTest);
+    
+    // Keep track of the original sequence of real tests for validation
+    const originalRealTestSequence = [...realTests];
+    
+    // Shuffle dummy tests (these can go anywhere)
+    const shuffledDummyTests = [...dummyTests];
+    for (let i = shuffledDummyTests.length - 1; i > 0; i--) {
+      const j = Math.floor(rng.next() * (i + 1));
+      [shuffledDummyTests[i], shuffledDummyTests[j]] = [shuffledDummyTests[j], shuffledDummyTests[i]];
+    }
+    
+    // Create a sequence for real tests that respects dependencies
+    // Critical tests like fingerprinting may need to remain in a specific relative order
+    const orderedRealTests = orderRealTestsWithDependencies(realTests, rng);
+    
+    // Now we need to interleave the dummy tests between the real tests
+    const finalTestSequence = [];
+    
+    // Interleave in a way that doesn't put too many dummy tests together
+    // This makes it harder to identify which are the real tests
+    if (shuffledDummyTests.length === 0) {
+      // If no dummy tests, just use the ordered real tests
+      return orderedRealTests;
+    } else {
+      // Distribute dummy tests between real tests
+      // We'll create slots between real tests where dummy tests can go
+      
+      // Start with the first real test (always keep this first for proper initialization)
+      finalTestSequence.push(orderedRealTests[0]);
+      
+      // Initialize dummy test index
+      let dummyIndex = 0;
+      
+      // For each gap between real tests
+      for (let i = 1; i < orderedRealTests.length; i++) {
+        // Decide how many dummy tests to insert before the next real test
+        const maxDummiesToInsert = Math.min(
+          shuffledDummyTests.length - dummyIndex,
+          // Use RNG to determine how many dummy tests to insert (0-3)
+          Math.floor(rng.next() * 4)
+        );
+        
+        // Insert the determined number of dummy tests
+        for (let j = 0; j < maxDummiesToInsert; j++) {
+          if (dummyIndex < shuffledDummyTests.length) {
+            finalTestSequence.push(shuffledDummyTests[dummyIndex]);
+            dummyIndex++;
+          }
+        }
+        
+        // Add the next real test
+        finalTestSequence.push(orderedRealTests[i]);
+      }
+      
+      // Add any remaining dummy tests at the end
+      while (dummyIndex < shuffledDummyTests.length) {
+        finalTestSequence.push(shuffledDummyTests[dummyIndex]);
+        dummyIndex++;
+      }
+    }
+    
+    // Record the shuffle mapping for verification purposes
+    finalTestSequence.forEach((test, index) => {
+      test.originalIndex = tests.findIndex(t => t.id === test.id);
+      test.shuffledIndex = index;
+    });
+    
+    return finalTestSequence;
+  }
+  
 function createTestChain(testOrder, seed) {
   const chainedTests = [];
   let previousTestId = null;
