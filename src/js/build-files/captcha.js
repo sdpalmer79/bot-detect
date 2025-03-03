@@ -4,11 +4,141 @@
     const urlParams = new URLSearchParams(window.location.search);
     const securityToken = urlParams.get('token') || '';
     
-    // Store test results and hashes
-    let testResults = [];
-    let currentChainHash = '';
+    // Store test results
     let captchaChallenge = null;
     
+    // Generate a UUID for request correlation
+    function generateUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+
+    // Collect environment data
+    function collectEnvironmentData() {
+      return {
+        // Screen properties
+        screen: {
+          width: window.screen.width,
+          height: window.screen.height,
+          availWidth: window.screen.availWidth,
+          availHeight: window.screen.availHeight,
+          colorDepth: window.screen.colorDepth,
+          pixelDepth: window.screen.pixelDepth,
+          orientation: window.screen.orientation?.type
+        },
+        
+        // Browser capabilities
+        browser: {
+          userAgent: navigator.userAgent,
+          platform: navigator.platform,
+          language: navigator.language,
+          languages: navigator.languages,
+          doNotTrack: navigator.doNotTrack,
+          cookieEnabled: navigator.cookieEnabled,
+          hardwareConcurrency: navigator.hardwareConcurrency || 0,
+          deviceMemory: navigator.deviceMemory || 0,
+          maxTouchPoints: navigator.maxTouchPoints || 0
+        },
+        
+        // Window properties
+        window: {
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+          outerWidth: window.outerWidth,
+          outerHeight: window.outerHeight,
+          devicePixelRatio: window.devicePixelRatio
+        }
+      };
+    }
+
+    // Get connection information if available
+    function getConnectionInfo() {
+      if (!navigator.connection) return null;
+      
+      return {
+        effectiveType: navigator.connection.effectiveType,
+        downlink: navigator.connection.downlink,
+        rtt: navigator.connection.rtt,
+        saveData: navigator.connection.saveData
+      };
+    }
+
+    // Detect browser features
+    function detectFeatures() {
+      return {
+        webGL: !!window.WebGLRenderingContext,
+        canvas: !!window.CanvasRenderingContext2D,
+        webAudio: !!window.AudioContext || !!window.webkitAudioContext,
+        touchEvents: 'ontouchstart' in window,
+        webRTC: !!window.RTCPeerConnection
+      };
+    }
+
+    // Behavioral data collection
+    function collectBehavioralData(detailed = false) {
+      // Basic data always collected
+      const data = {
+        pageLoadTime: performance.now(),
+        userInteractionCount: window._userInteractions || 0,
+        formInteractions: window._formInteractions || 0
+      };
+      
+      // Detailed data for final submission
+      if (detailed) {
+        data.mouseMovements = window._mouseMovements || 0;
+        data.keyPresses = window._keyPresses || 0;
+        data.scrollEvents = window._scrollEvents || 0;
+        data.timeOnPage = performance.now();
+        data.focusBlurEvents = window._focusEvents || 0;
+      }
+      
+      return data;
+    }
+
+    // Get performance timing data
+    function getNavigationTiming() {
+      if (!performance || !performance.timing) return {};
+      
+      const timing = performance.timing;
+      return {
+        navigationStart: timing.navigationStart,
+        domComplete: timing.domComplete,
+        loadEventEnd: timing.loadEventEnd,
+        domainLookupEnd: timing.domainLookupEnd - timing.domainLookupStart,
+        connectEnd: timing.connectEnd - timing.connectStart,
+        responseEnd: timing.responseEnd - timing.responseStart,
+        domInteractive: timing.domInteractive - timing.navigationStart,
+        domContentLoaded: timing.domContentLoadedEventEnd - timing.navigationStart
+      };
+    }
+
+    // Get resource timing information
+    function getResourceTiming() {
+      if (!performance || !performance.getEntriesByType) return [];
+      
+      // Get timing for script resources
+      return performance.getEntriesByType('resource')
+        .filter(resource => resource.initiatorType === 'script')
+        .map(resource => ({
+          name: resource.name.split('/').pop(),
+          duration: resource.duration,
+          size: resource.transferSize || 0
+        }));
+    }
+
+    // Get memory info if available
+    function getMemoryInfo() {
+      if (!performance || !performance.memory) return {};
+      
+      return {
+        jsHeapSizeLimit: performance.memory?.jsHeapSizeLimit,
+        totalJSHeapSize: performance.memory?.totalJSHeapSize,
+        usedJSHeapSize: performance.memory?.usedJSHeapSize
+      };
+    }
+
     async function initCaptcha() {
       try {
         // Request challenge from server
@@ -38,21 +168,85 @@
     }
     
     async function requestChallenge() {
+      // Generate request ID to correlate this request with later submissions
+      const requestId = generateUUID();
+      
+      // Collect environment data
+      const envData = collectEnvironmentData();
+      
+      // Collect behavioral data
+      const behaviorData = collectBehavioralData();
+      
       const response = await fetch('/api/request-challenge', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'X-Security-Token': securityToken
+          'X-Security-Token': securityToken,
+          'X-Request-ID': requestId
         },
         body: JSON.stringify({
+          // Request metadata
+          requestId: requestId,
           timestamp: Date.now(),
-          screenWidth: window.screen.width,
-          screenHeight: window.screen.height,
           token: securityToken,
-          userAgent: navigator.userAgent,
-          language: navigator.language
+          pageUrl: window.location.href,
+          referrer: document.referrer,
+          
+          // Environment data
+          environment: {
+            // Screen properties
+            screen: {
+              width: window.screen.width,
+              height: window.screen.height,
+              availWidth: window.screen.availWidth,
+              availHeight: window.screen.availHeight,
+              colorDepth: window.screen.colorDepth,
+              pixelDepth: window.screen.pixelDepth,
+              orientation: window.screen.orientation?.type
+            },
+            
+            // Window properties
+            window: {
+              innerWidth: window.innerWidth,
+              innerHeight: window.innerHeight,
+              outerWidth: window.outerWidth,
+              outerHeight: window.outerHeight,
+              devicePixelRatio: window.devicePixelRatio
+            },
+            
+            // Browser capabilities
+            browser: {
+              userAgent: navigator.userAgent,
+              platform: navigator.platform,
+              language: navigator.language,
+              languages: navigator.languages,
+              doNotTrack: navigator.doNotTrack,
+              cookieEnabled: navigator.cookieEnabled,
+              hardwareConcurrency: navigator.hardwareConcurrency || 0,
+              deviceMemory: navigator.deviceMemory || 0,
+              maxTouchPoints: navigator.maxTouchPoints || 0
+            },
+            
+            // Time & location info
+            timeZone: {
+              offset: new Date().getTimezoneOffset(),
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            },
+            
+            // Connection information (if available)
+            connection: getConnectionInfo(),
+            
+            // Feature detection
+            features: detectFeatures()
+          },
+          
+          // Behavioral data
+          behavior: behaviorData
         })
       });
+      
+      // Store the request ID for later correlation
+      localStorage.setItem('captchaRequestId', requestId);
       
       if (!response.ok) {
         throw new Error("Failed to get CAPTCHA challenge");
@@ -75,163 +269,66 @@
       });
     }
     
-    /**
-     * Runs the proof of work algorithm to establish initial chain hash
-     */
-    async function findProofOfWork(difficulty, prefix, timestamp, token) {
-        try {
-        // Target pattern: required number of leading zeros
-        const targetPattern = new RegExp(`^${'0'.repeat(difficulty)}`);
-        
-        // Base string includes timestamp and token
-        const baseString = prefix + timestamp + token;
-        
-        // Start searching for a solution
-        let nonce = 0;
-        let hash = '';
-        const startTime = performance.now();
-        
-        while (true) {
-            // Check if we've been searching too long
-            if (performance.now() - startTime > 10000) {
-                // Prevent excessive computation - limit to 10 seconds
-                return {
-                    nonce: nonce,
-                    hash: hash,
-                    solved: false,
-                    timeSpent: performance.now() - startTime,
-                    attemptsCount: nonce,
-                };
-            }
-            
-            // Try a new nonce
-            hash = await sha256(baseString + nonce);
-            
-            // Check if this hash meets our difficulty requirement
-            if (targetPattern.test(hash)) {
-                // Found a solution!
-                return {
-                    nonce: nonce,
-                    hash: hash,
-                    solved: true,
-                    timeSpent: performance.now() - startTime,
-                    attemptsCount: nonce
-                };
-            }
-            nonce++;
-            
-            // Update progress occasionally
-            if (nonce % 1000 === 0) {
-                updateStatus(`Verification in progress... (${(performance.now() - startTime).toFixed(0)}ms)`);
-            }
-        }
-        } catch (error) {
-            console.error("Error in proof of work:", error);
-            return {
-                error: "Computation failed", 
-                solved: false,
-            };
-        }
-    }
     
-    /**
-     * Runs the proof of work algorithm to establish initial chain hash
-     */
-    async function runProofOfWork(challenge) {
-        updateStatus("Starting verification process...");
-        
-        try {
-            const { powDifficulty, powPrefix, timestamp } = challenge;
-            
-            // Run the proof of work calculation
-            const result = await findProofOfWork(powDifficulty, powPrefix, timestamp, securityToken);
-            updateStatus("Initial verification step complete...");
-            return result;
-            
-        } catch (error) {
-            console.error("Proof of work error:", error);
-            throw new Error("Failed to complete initial verification step");
-        }
-    }
-    
-    /**
-     * SHA-256 hash function using Web Crypto API
-     */
-    async function sha256(message) {
-      try {
-        // Convert string to buffer for hashing
-        const msgBuffer = new TextEncoder().encode(message);
-        // Hash the message
-        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-        // Convert to hex string
-        return Array.from(new Uint8Array(hashBuffer))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('');
-      } catch (error) {
-        // Fallback for environments without crypto.subtle
-        return simpleHash(message);
-      }
-    }
-    
-    /**
-     * Simple hash function for fallback when crypto API is unavailable
-     */
-    function simpleHash(str) {
-      let hash = 0;
-      for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32bit integer
-      }
-      return Math.abs(hash).toString(16).padStart(8, '0');
-    }
-    
-    /**
-     * Submit all test results back to server for verification
-     */
-    async function submitCaptchaResults() {
+    // Submit all test results back to server for verification
+    async function submitCaptchaResults(verificationResults) {
       updateStatus("Completing verification...");
+      
+      // Get the stored request ID 
+      const requestId = localStorage.getItem('captchaRequestId');
+      
+      // Collect current environment data
+      const currentEnvData = collectEnvironmentData();
+      
+      // Collect full behavioral data
+      const fullBehaviorData = collectBehavioralData(true);
       
       try {
         const response = await fetch('/api/verify-captcha', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'X-Security-Token': securityToken
+            'X-Security-Token': securityToken,
+            'X-Request-ID': requestId
           },
           body: JSON.stringify({
+            // Challenge identification
             challengeId: captchaChallenge.id,
-            challengeSolution: {
-              testResults: testResults,
-              finalChainHash: currentChainHash,
-              completionTime: performance.now() - testResults[0].result.timeSpent,
-              powResult: testResults[0].result
-            },
+            initialRequestId: requestId,
             timestamp: Date.now(),
-            token: securityToken
+            token: securityToken,
+            
+            // Results from tests
+            challengeSolution: {
+              testResults: verificationResults.testResults,
+              finalChainHash: verificationResults.finalChainHash,
+              completionTime: verificationResults.completionTime,
+              powResult: verificationResults.powResult
+            },
+            
+            // Current environment data for comparison
+            currentEnvironment: currentEnvData,
+            
+            // Behavioral data
+            behavior: fullBehaviorData,
+            
+            // Performance data
+            performance: {
+              navigationTiming: getNavigationTiming(),
+              resourceTiming: getResourceTiming(),
+              memoryInfo: getMemoryInfo()
+            }
           })
         });
         
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.reason || "Verification failed");
-        }
-        
-        const result = await response.json();
-        if (result.success) {
-          showSuccess(result);
-        } else {
-          showError("Verification failed: " + (result.reason || "Unknown error"));
-        }
+        // Process response...
       } catch (error) {
         console.error("Error submitting CAPTCHA results:", error);
         showError("Failed to complete verification process");
       }
     }
     
-    /**
-     * Create the CAPTCHA UI container
-     */
+    // Create the CAPTCHA UI container
     function createCaptchaContainer() {
       // Create or find the container
       let container = document.getElementById('captcha-container');
@@ -259,9 +356,7 @@
       container.appendChild(statusDiv);
     }
     
-    /**
-     * Update status message in the CAPTCHA container
-     */
+    // Update status message in the CAPTCHA container
     function updateStatus(message) {
       const statusElement = document.getElementById('captcha-status');
       if (statusElement) {
@@ -269,9 +364,7 @@
       }
     }
     
-    /**
-     * Show success message and handle redirection
-     */
+    // Show success message and handle redirection
     function showSuccess(result) {
       const container = document.getElementById('captcha-container');
       if (container) {
@@ -297,9 +390,7 @@
       }
     }
     
-    /**
-     * Show error message
-     */
+    // Show error message
     function showError(message) {
       const container = document.getElementById('captcha-container');
       if (container) {
