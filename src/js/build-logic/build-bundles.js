@@ -1,8 +1,8 @@
-import { generateUniqueBundle } from './assembler';
-import { obfuscateBundle } from './obfuscator';
-import { v4 as uuidv4 } from 'uuid';
-import { writeFileSync } from 'fs';
-import { join } from 'path';
+const { generateUniqueBundle } = require('./assembler');
+const { obfuscateBundle } = require('./obfuscator');
+const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
+const path = require('path');
 
 async function buildBundles(count = 1) {
   console.log(`Building ${count} CAPTCHA bundles...`);
@@ -33,8 +33,8 @@ async function buildBundles(count = 1) {
   }
   
   // Write index file
-  const indexPath = join(__dirname, '..', 'bundles', 'index.json');
-  writeFileSync(indexPath, JSON.stringify(results, null, 2));
+  const indexPath = path.join(__dirname, '..', 'bundles', 'index.json');
+  fs.writeFileSync(indexPath, JSON.stringify(results, null, 2));
   
   console.log(`Build complete. Created ${results.length} bundles.`);
   return results;
@@ -46,4 +46,4 @@ if (require.main === module) {
   buildBundles(count).catch(console.error);
 }
 
-export default { buildBundles };
+module.exports = { buildBundles };

@@ -1,9 +1,8 @@
-import express, { json, static } from 'express';
-import cors from 'cors';
-import { join } from 'path';
-import { readFileSync, existsSync, mkdirSync, copyFileSync, readdirSync, writeFileSync } from 'fs';
-import default from './js/build-logic/build-bundles';
-const { buildBundles } = default;
+const cors = require('cors');
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const { buildBundles } = require('./src/js/build-logic/build-bundles');
 
 // Create debug server
 async function startDebugServer(port = 3000) {
@@ -17,20 +16,20 @@ async function startDebugServer(port = 3000) {
   
   // Get bundle paths
   const bundleDir = testBundle.path;
-  const bundleJsPath = join(bundleDir, 'captcha.js');
-  const bundleDataPath = join(bundleDir, 'bundle-data.json');
+  const bundleJsPath = path.join(bundleDir, 'captcha.js');
+  const bundleDataPath = path.join(bundleDir, 'bundle-data.json');
   
   // Read bundle data
-  const bundleData = JSON.parse(readFileSync(bundleDataPath, 'utf-8'));
+  const bundleData = JSON.parse(fs.readFileSync(bundleDataPath, 'utf-8'));
   
   // Setup debug directory
-  const debugDir = join(__dirname, 'debug');
-  if (!existsSync(debugDir)) {
-    mkdirSync(debugDir, { recursive: true });
+  const debugDir = path.join(__dirname, 'debug');
+  if (!fs.existsSync(debugDir)) {
+    fs.mkdirSync(debugDir, { recursive: true });
   }
   
   // Copy frontend files to debug directory
-  const sourceDir = join(__dirname, '..', 'build-files');
+  const sourceDir = path.join(__dirname, '..', 'build-files');
   copyFrontendFiles(sourceDir, debugDir);
   
   // Create Express app
@@ -38,7 +37,7 @@ async function startDebugServer(port = 3000) {
   
   // Middleware
   app.use(cors());
-  app.use(json());
+  app.use(express.json());
   
   // Log all requests
   app.use((req, res, next) => {
@@ -47,7 +46,7 @@ async function startDebugServer(port = 3000) {
   });
   
   // Serve static files from debug directory
-  app.use(static(debugDir));
+  app.use(express.static(debugDir));
   
   // Serve bundle file
   app.get('/bundle/:bundleId', (req, res) => {
@@ -107,40 +106,40 @@ function copyFrontendFiles(sourceDir, targetDir) {
   console.log(`Copying frontend files from ${sourceDir} to ${targetDir}`);
   
   // Create css directory if it doesn't exist
-  const cssDir = join(targetDir, 'css');
-  if (!existsSync(cssDir)) {
-    mkdirSync(cssDir, { recursive: true });
+  const cssDir = path.join(targetDir, 'css');
+  if (!fs.existsSync(cssDir)) {
+    fs.mkdirSync(cssDir, { recursive: true });
   }
   
   // Create js directory if it doesn't exist
-  const jsDir = join(targetDir, 'js');
-  if (!existsSync(jsDir)) {
-    mkdirSync(jsDir, { recursive: true });
+  const jsDir = path.join(targetDir, 'js');
+  if (!fs.existsSync(jsDir)) {
+    fs.mkdirSync(jsDir, { recursive: true });
   }
   
   try {
     // Copy index.html
-    copyFileSync(
-      join(sourceDir, 'index.html'), 
-      join(targetDir, 'index.html')
+    fs.copyFileSync(
+      path.join(sourceDir, 'index.html'), 
+      path.join(targetDir, 'index.html')
     );
     console.log('Copied index.html');
     
     // Copy captcha.js
-    copyFileSync(
-      join(sourceDir, 'captcha.js'), 
-      join(targetDir, 'js', 'captcha.js')
+    fs.copyFileSync(
+      path.join(sourceDir, 'captcha.js'), 
+      path.join(targetDir, 'js', 'captcha.js')
     );
     console.log('Copied captcha.js');
     
     // Copy CSS files if they exist
-    const sourceCssDir = join(sourceDir, 'css');
-    if (existsSync(sourceCssDir)) {
-      readdirSync(sourceCssDir).forEach(file => {
+    const sourceCssDir = path.join(sourceDir, 'css');
+    if (fs.existsSync(sourceCssDir)) {
+      fs.readdirSync(sourceCssDir).forEach(file => {
         if (file.endsWith('.css')) {
-          copyFileSync(
-            join(sourceCssDir, file),
-            join(cssDir, file)
+          fs.copyFileSync(
+            path.join(sourceCssDir, file),
+            path.join(cssDir, file)
           );
           console.log(`Copied css/${file}`);
         }
@@ -148,14 +147,14 @@ function copyFrontendFiles(sourceDir, targetDir) {
     } else {
       console.log('No CSS directory found, creating empty captcha.css');
       // Create an empty CSS file if none exists
-      writeFileSync(
-        join(cssDir, 'captcha.css'),
+      fs.writeFileSync(
+        path.join(cssDir, 'captcha.css'),
         '/* Debug CSS file */'
       );
     }
     
     // Inject debug script into index.html
-    injectDebugScript(join(targetDir, 'index.html'));
+    injectDebugScript(path.join(targetDir, 'index.html'));
     
   } catch (error) {
     console.error('Error copying frontend files:', error);
@@ -164,7 +163,7 @@ function copyFrontendFiles(sourceDir, targetDir) {
 
 // Inject a debug logging script into the HTML
 function injectDebugScript(htmlPath) {
-  let html = readFileSync(htmlPath, 'utf8');
+  let html = fs.readFileSync(htmlPath, 'utf8');
   
   // Create a debug panel script that will allow monitoring
   const debugScript = `
@@ -275,7 +274,7 @@ function injectDebugScript(htmlPath) {
   // Insert the debug panel just before the closing body tag
   html = html.replace('</body>', `${debugScript}\n</body>`);
   
-  writeFileSync(htmlPath, html);
+  fs.writeFileSync(htmlPath, html);
   console.log('Injected debug panel into index.html');
 }
 
@@ -315,4 +314,4 @@ if (require.main === module) {
   startDebugServer(port).catch(console.error);
 }
 
-export default { startDebugServer };
+module.exports = { startDebugServer };

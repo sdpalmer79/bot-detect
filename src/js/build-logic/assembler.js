@@ -9,25 +9,27 @@ const testTemplates = loadAllTestTemplates();
 function loadAllTestTemplates() {
     try {
       // Import test template modules
-      const webglTests = require('./templates/webgl-tests');
-      const timingTests = require('./templates/timing-tests');
-      const environmentTests = require('./templates/environment-tests');
-      const interactionTests = require('./templates/interaction-tests');
-      const networkTests = require('./templates/network-tests');
-      const inputBehaviorTests = require('./templates/input-behavior-tests'); 
-      const deviceIntegrityTests = require('./templates/device-integrity-tests');
-      const automationTests = require('./templates/automation-detection-tests');
+      const { 
+        webglTests, 
+        timingTests, 
+        environmentTests, 
+        interactionTests,
+        networkTests,
+        inputBehaviorTests,
+        deviceIntegrityTests,
+        automationTests
+      } = require('./templates');
   
       // Return combined templates object
       return {
-        webglTests: webglTests.default || webglTests,
-        timingTests: timingTests.default || timingTests,
-        environmentTests: environmentTests.default || environmentTests,
-        interactionTests: interactionTests.default || interactionTests,
-        networkTests: networkTests.default || networkTests,
-        inputBehaviorTests: inputBehaviorTests.default || inputBehaviorTests,
-        deviceIntegrityTests: deviceIntegrityTests.default || deviceIntegrityTests,
-        automationTests: automationTests.default || automationTests
+        webglTests, 
+        timingTests, 
+        environmentTests, 
+        interactionTests,
+        networkTests,
+        inputBehaviorTests,
+        deviceIntegrityTests,
+        automationTests
       };
     } catch (error) {
       console.error('Failed to load test templates:', error);
@@ -171,11 +173,7 @@ function selectRandomDummyTests(templates, seed, excludeIds, options = {}) {
     // Mark the selected tests as dummy tests (not real verification tests)
     return selected.map(test => ({
       ...test,
-      isRealTest: false,
-      
-      // Optionally modify the test to be less resource-intensive
-      // since it's only for obfuscation purposes
-      code: modifyTestForDummyUse(test.code, rng)
+      isRealTest: false
     }));
   }
   
@@ -434,9 +432,6 @@ function shuffleTests(tests, seed) {
     // First, separate real tests and dummy tests
     const realTests = tests.filter(test => test.isRealTest);
     const dummyTests = tests.filter(test => !test.isRealTest);
-    
-    // Keep track of the original sequence of real tests for validation
-    const originalRealTestSequence = [...realTests];
     
     // Shuffle dummy tests (these can go anywhere)
     const shuffledDummyTests = [...dummyTests];
@@ -931,7 +926,7 @@ window.CaptchaSystem = {
   return bundleCode;
 }
 
-export function generateUniqueBundle(bundleId) {
+function generateUniqueBundle(bundleId) {
     // Generate a unique seed for this bundle
     const bundleSeed = crypto.randomBytes(16).toString('hex');
     
@@ -986,3 +981,5 @@ export function generateUniqueBundle(bundleId) {
       bundleData
     };
   }
+
+  module.exports = { generateUniqueBundle };

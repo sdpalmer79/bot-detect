@@ -1,4 +1,4 @@
-export const webglTests = {
+const webglTests = {
   // Variations that can be randomly selected and customized
   variations: [
     {
@@ -23,8 +23,9 @@ export const webglTests = {
             \`);
             gl.compileShader(vertexShader);
             
+            // Move this shader source code inside the function where width and height are defined
             const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-            gl.shaderSource(fragmentShader, \`
+            const fragmentShaderSource = \`
               precision mediump float;
               uniform float u_seed;
               
@@ -33,13 +34,14 @@ export const webglTests = {
               }
               
               void main() {
-                vec2 uv = gl_FragCoord.xy / vec2(${width}.0, ${height}.0);
+                vec2 uv = gl_FragCoord.xy / vec2(\${width}.0, \${height}.0);
                 float r = random(uv * u_seed);
                 float g = random(uv * u_seed + 1.0);
                 float b = random(uv * u_seed + 2.0);
                 gl_FragColor = vec4(r, g, b, 1.0);
               }
-            \`);
+            \`;
+            gl.shaderSource(fragmentShader, fragmentShaderSource);
             gl.compileShader(fragmentShader);
             
             const program = gl.createProgram();
@@ -228,7 +230,7 @@ export const webglTests = {
   ]
 };
 
-export const timingTests = {
+const timingTests = {
   variations: [
     {
       id: "timing_loop",
@@ -292,7 +294,7 @@ export const timingTests = {
   ]
 };
 
-export const environmentTests = {
+const environmentTests = {
   variations: [
     {
       id: "browser_fingerprint",
@@ -401,22 +403,33 @@ export const environmentTests = {
   ]
 };
 
-export const interactionTests = {
+const interactionTests = {
   variations: []
 }
 
-export const networkTests = {
+const networkTests = {
   variations: []
 }
 
-export const inputBehaviorTests = {
+const inputBehaviorTests = {
   variations: []
 }
 
-export const deviceIntegrityTests = {
+const deviceIntegrityTests = {
   variations: []
 }
 
-export const automationTests = {
+const automationTests = {
   variations: []
 }
+
+module.exports = {
+  webglTests,
+  timingTests,
+  environmentTests,
+  interactionTests,
+  networkTests,
+  inputBehaviorTests,
+  deviceIntegrityTests,
+  automationTests
+};

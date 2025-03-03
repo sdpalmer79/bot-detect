@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-export async function obfuscateBundle(bundleInfo) {
+async function obfuscateBundle(bundleInfo) {
   const { bundleId, bundleDir } = bundleInfo;
   
   // Read the source bundle
@@ -41,14 +41,18 @@ function generateUniqueObfuscationOptions(bundleId) {
   const seed = parseInt(bundleId.replace(/[^0-9]/g, '').substring(0, 8), 10);
   const random = new PseudoRandom(seed);
   
+  // Determine if debug protection is enabled
+  const debugProtectionEnabled = random.next() > 0.5;
+  
   return {
     compact: true,
     controlFlowFlattening: true,
     controlFlowFlatteningThreshold: 0.6 + (random.next() * 0.3),
     deadCodeInjection: true,
     deadCodeInjectionThreshold: 0.4 + (random.next() * 0.4),
-    debugProtection: random.next() > 0.5,
-    debugProtectionInterval: random.next() > 0.7,
+    debugProtection: debugProtectionEnabled,
+    // Only set the interval if debug protection is enabled
+    debugProtectionInterval: debugProtectionEnabled ? Math.floor(1000 + random.next() * 3000) : 0,
     disableConsoleOutput: false, // Keep for debugging
     domainLock: [],
     identifierNamesGenerator: ['hexadecimal', 'mangled'][Math.floor(random.next() * 2)],
@@ -64,7 +68,7 @@ function generateUniqueObfuscationOptions(bundleId) {
     splitStrings: true,
     splitStringsChunkLength: 5 + Math.floor(random.next() * 10),
     stringArray: true,
-    stringArrayEncoding: ['base64', 'rc4'][Math.floor(random.next() * 2)],
+    stringArrayEncoding: random.next() > 0.5 ? ['base64'] : ['rc4'],
     stringArrayThreshold: 0.7 + (random.next() * 0.3),
     transformObjectKeys: random.next() > 0.3,
     unicodeEscapeSequence: random.next() > 0.7
@@ -95,3 +99,4 @@ async function minifyCode(code) {
     .replace(/\/\/.*?\n/g, '')
     .replace(/\/\*.*?\*\//g, '');
 }
+module.exports = { obfuscateBundle };
