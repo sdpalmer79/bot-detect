@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-async function obfuscateBundle(bundleInfo) {
+export async function obfuscateBundle(bundleInfo) {
   const { bundleId, bundleDir } = bundleInfo;
   
   // Read the source bundle

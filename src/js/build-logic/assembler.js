@@ -954,28 +954,35 @@ export function generateUniqueBundle(bundleId) {
     // 6. Create original source version (for debugging)
     fs.writeFileSync(path.join(bundleDir, 'captcha.src.js'), bundleCode);
     
-    // 7. Create the symbol map
-    const symbolMap = createSymbolMap(chainedTests);
-    fs.writeFileSync(path.join(bundleDir, 'symbols.json'), JSON.stringify(symbolMap, null, 2));
-    
-    // 8. Create metadata
-    const metadata = {
+    // 7. Create the bundle data
+    const bundleData = {
+      // Bundle identity
       bundleId,
-      testSequence: testOrder.map(t => t.originalId),
-      testChaining: chainedTests.map(t => ({
-        id: t.id,
-        dependsOn: t.dependsOn,
-        isRealTest: t.isRealTest
-      })),
       created: new Date().toISOString(),
-      bundleSeed
+      bundleSeed,
+      
+      // Complete test information in a single array
+      tests: chainedTests.map(test => ({
+        id: test.id,                   // Random ID (test_a8f3b9c2)
+        originalId: test.originalId,   // Template ID (webgl_basic)
+        functionName: test.functionName, // Function name in bundle
+        isRealTest: test.isRealTest,  // Real or dummy test
+        dependsOn: test.dependsOn,    // Previous test ID for chaining
+        paramValues: test.paramValues // Parameter values for this test
+      })),
+      
+      // convenience arrays for faster access
+      testOrder: chainedTests.map(test => test.id),
+      originalIds: chainedTests.map(test => test.originalId),
+      realTests: chainedTests.filter(test => test.isRealTest).map(test => test.id),
     };
-    fs.writeFileSync(path.join(bundleDir, 'metadata.json'), JSON.stringify(metadata, null, 2));
-    
+
+    // Write bundle data to file
+    fs.writeFileSync(path.join(bundleDir, 'bundle-data.json'), JSON.stringify(bundleData, null, 2));
+        
     return {
       bundleId,
       bundleDir,
-      metadata,
-      symbolMap
+      bundleData
     };
   }
