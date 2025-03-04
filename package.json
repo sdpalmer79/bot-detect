@@ -12,6 +12,7 @@
   "dependencies": {
     "javascript-obfuscator": "^4.1.1",
     "jquery": "^3.6.0",
+    "terser": "^5.39.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

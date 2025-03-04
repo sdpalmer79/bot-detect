@@ -4,6 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
 
+const baseBundleDir = process.env.BUNDLES_BASE_DIR;
+
 async function buildBundles(count = 1) {
   console.log(`Building ${count} CAPTCHA bundles...`);
   
@@ -14,7 +16,7 @@ async function buildBundles(count = 1) {
     const bundleId = uuidv4();
     
     // Step 1: Generate the basic bundle
-    const bundleInfo = generateUniqueBundle(bundleId);
+    const bundleInfo = generateUniqueBundle(bundleId, baseBundleDir);
     
     // Step 2: Apply obfuscation
     const obfuscatedInfo = await obfuscateBundle(bundleInfo);
@@ -33,7 +35,7 @@ async function buildBundles(count = 1) {
   }
   
   // Write index file
-  const indexPath = path.join(__dirname, '..', 'bundles', 'index.json');
+  const indexPath = path.join(baseBundleDir, 'index.json');
   fs.writeFileSync(indexPath, JSON.stringify(results, null, 2));
   
   console.log(`Build complete. Created ${results.length} bundles.`);

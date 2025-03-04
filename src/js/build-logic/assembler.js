@@ -926,7 +926,7 @@ window.CaptchaSystem = {
   return bundleCode;
 }
 
-function generateUniqueBundle(bundleId) {
+function generateUniqueBundle(bundleId, baseBundleDir) {
     // Generate a unique seed for this bundle
     const bundleSeed = crypto.randomBytes(16).toString('hex');
     
@@ -943,7 +943,7 @@ function generateUniqueBundle(bundleId) {
     const bundleCode = assembleBundleCode(chainedTests, bundleSeed);
     
     // 5. Create the bundle directory
-    const bundleDir = path.join(__dirname, '..', 'bundles', `bundle-${bundleId}`);
+    const bundleDir = path.join(baseBundleDir, `${bundleId}`);
     fs.mkdirSync(bundleDir, { recursive: true });
     
     // 6. Create original source version (for debugging)
@@ -965,11 +965,6 @@ function generateUniqueBundle(bundleId) {
         dependsOn: test.dependsOn,    // Previous test ID for chaining
         paramValues: test.paramValues // Parameter values for this test
       })),
-      
-      // convenience arrays for faster access
-      testOrder: chainedTests.map(test => test.id),
-      originalIds: chainedTests.map(test => test.originalId),
-      realTests: chainedTests.filter(test => test.isRealTest).map(test => test.id),
     };
 
     // Write bundle data to file

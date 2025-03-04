@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const JavaScriptObfuscator = require('javascript-obfuscator');
+const Terser = require('terser');
 
 async function obfuscateBundle(bundleInfo) {
   const { bundleId, bundleDir } = bundleInfo;
@@ -91,12 +92,33 @@ class PseudoRandom {
 }
 
 async function minifyCode(code) {
-  // In a real implementation, use a proper minifier like Terser
-  // This is a placeholder
-  return code
-    .replace(/\s+/g, ' ')
-    .replace(/\/\/.*?\n/g, '')
-    .replace(/\/\*.*?\*\//g, '');
+  try {
+    // More aggressive minification with Terser
+    const result = await Terser.minify(code, {
+      compress: {
+        dead_code: true,
+        drop_debugger: false, // Keep deliberate debugger statements
+        global_defs: {
+          "@console.log": "undefined" // Replace console.logs
+        },
+        passes: 3 // Multiple compression passes
+      },
+      mangle: {
+        properties: {
+          // Mangle property names that aren't exposed to outside code
+          regex: /^_/
+        }
+      },
+      output: {
+        beautify: false
+      }
+    });
+    
+    return result.code;
+  } catch (error) {
+    console.error("Minification error:", error);
+    return code; // Return original code if minification fails
+  }
 }
 
 // Advanced runtime checks to detect debugging attempt
