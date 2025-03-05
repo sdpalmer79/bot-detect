@@ -53,37 +53,57 @@ function loadAllTestTemplates() {
  * @param {Object} templates - All test templates
  * @param {string} category - Category name (e.g., 'timingTests')
  * @param {Object} options - Selection options
- * @param {number} [options.count=1] - Number of tests to select
+ * @param {number} [options.maxCount=1] - Maximum number of tests to select
  * @param {Array<string>} [options.exclude=[]] - IDs to exclude
+ * @param {Array<string>} [options.include=[]] - IDs to specifically include
  * @param {boolean} [options.randomize=true] - Whether to randomize selection
  * @param {string} [options.seed] - Seed for deterministic selection
  * @return {Array<Object>} - Selected tests
  */
 function selectMultipleFromCategory(templates, category, options = {}) {
-    const {
-      count = 1,
-      exclude = [],
-      randomize = true,
-      seed = crypto.randomBytes(8).toString('hex')
-    } = options;
+  const {
+    maxCount = 1,
+    exclude = [],
+    include = [],
+    randomize = true,
+    seed = crypto.randomBytes(8).toString('hex')
+  } = options;
+  
+  // Rest of the function should use maxCount instead of count
+  if (!templates[category] || !templates[category].variations || 
+      templates[category].variations.length === 0) {
+    return [];
+  }
+  
+  // First handle specifically included tests
+  let selectedTests = [];
+  
+  if (include && include.length > 0) {
+    include.forEach(id => {
+      const test = templates[category].variations.find(t => t.id === id);
+      if (test && !exclude.includes(id)) {
+        selectedTests.push(test);
+      }
+    });
+  }
+  
+  // Get available tests that aren't in the exclude list or already included
+  const alreadyIncludedIds = selectedTests.map(t => t.id);
+  const availableTests = templates[category].variations.filter(
+    test => !exclude.includes(test.id) && !alreadyIncludedIds.includes(test.id)
+  );
+  
+  if (availableTests.length === 0 && selectedTests.length === 0) {
+    return [];
+  }
+  
+  // If we need more tests to reach maxCount
+  if (selectedTests.length < maxCount) {
+    const remainingCount = maxCount - selectedTests.length;
     
-    if (!templates[category] || !templates[category].variations || 
-        templates[category].variations.length === 0) {
-      return [];
-    }
-    
-    // Get available tests that aren't in the exclude list
-    const availableTests = templates[category].variations.filter(
-      test => !exclude.includes(test.id)
-    );
-    
-    if (availableTests.length === 0) {
-      return [];
-    }
-    
-    // If count exceeds available tests, return all available
-    if (count >= availableTests.length) {
-      return [...availableTests];
+    // If maxCount exceeds available tests, return all available plus included
+    if (remainingCount >= availableTests.length) {
+      return [...selectedTests, ...availableTests];
     }
     
     // For deterministic selection, use the seed
@@ -99,13 +119,16 @@ function selectMultipleFromCategory(templates, category, options = {}) {
         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
       }
       
-      // Return the requested number of tests
-      return shuffled.slice(0, count);
+      // Return the requested number of tests plus included ones
+      return [...selectedTests, ...shuffled.slice(0, remainingCount)];
     } else {
-      // For non-random selection, take the first 'count' tests
-      return availableTests.slice(0, count);
+      // For non-random selection, take the first N tests
+      return [...selectedTests, ...availableTests.slice(0, remainingCount)];
     }
   }
+  
+  return selectedTests;
+}
   
   // Deterministic pseudo-random number generator
   class PseudoRandom {
@@ -179,6 +202,11 @@ function selectRandomDummyTests(templates, seed, excludeIds, options = {}) {
   
 // Select a mix of tests
 function selectTests(seed, templates) {
+    // Always include token verification test
+    const tokenVerificationTest = selectMultipleFromCategory(templates, 'tokenTests', {
+      include: ['token_verification']
+    });
+
     const webglTests = selectMultipleFromCategory(templates, 'webglTests', {
       count: 1, // Always include exactly 1 WebGL test
       randomize: false // Always select the primary test
@@ -881,6 +909,16 @@ window.CaptchaSystem = {
     console.log("Starting verification for challenge:", challenge.id);
     
     try {
+
+      // Verify the token matches this bundle
+      if (challenge.token !== '${bundledToken}') {
+        console.error("Token mismatch - possible forgery attempt");
+        return { 
+          success: false, 
+          error: "Invalid token"
+        };
+      }
+
       // Step 1: Perform proof of work
       console.log("Running proof of work...");
       const powResult = await runProofOfWork(challenge);

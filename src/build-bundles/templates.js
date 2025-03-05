@@ -1,3 +1,134 @@
+const tokenTests = {
+  category: "tokenTests",
+  variations: [
+    {
+      id: "token_verification",
+      description: "Performs verification of the challenge token",
+      code: `async function TEST_FUNCTION_NAME(testContext, chainData) {
+        try {
+          const { challenge } = testContext;
+          const { previousHash } = chainData;
+          
+          // Extract required data from challenge
+          const token = challenge.token || "";
+          const timestamp = challenge.timestamp || 0;
+          const challengeId = challenge.id || "";
+          
+          // Bundle-specific transformation seed (static for this bundle)
+          const TRANSFORM_SEED = "PARAM_TRANSFORM_SEED";
+          
+          // Start time measurement
+          const startTime = performance.now();
+          
+          // Phase 1: Initial hash of token with challenge data
+          let digest = await sha256(token + challengeId + timestamp);
+          
+          // Phase 2: Bundle-specific transformation
+          // Each bundle has a unique transform seed that affects the verification
+          digest = await performBundleTransform(digest, TRANSFORM_SEED);
+          
+          // Phase 3: Multiple rounds of computation
+          // The number of rounds is determined by the first byte of the transform seed
+          const rounds = (parseInt(TRANSFORM_SEED.substring(0, 2), 16) % 7) + 3; // 3-10 rounds
+          
+          for (let i = 0; i < rounds; i++) {
+            // Mix in the previous hash from the chain to connect verification to the test chain
+            digest = await sha256(digest + (i.toString()) + previousHash.substring(0, 8));
+            
+            // Apply additional transformations based on round number
+            digest = await applyRoundTransformation(digest, i, TRANSFORM_SEED);
+          }
+          
+          // Calculate completion time
+          const duration = performance.now() - startTime;
+          
+          // Return verification result
+          return {
+            verified: true,
+            tokenHash: digest.substring(0, 16), // Truncated hash value
+            duration,
+            rounds,
+            validUntil: timestamp + 900000, // Valid for 15 minutes
+            timestamp
+          };
+        } catch (error) {
+          return {
+            verified: false,
+            error: "Token verification failed",
+            errorMessage: error.message
+          };
+        }
+      }
+      
+      // Bundle-specific transformation function
+      async function performBundleTransform(input, seed) {
+        // Use the seed to create a unique transformation for each bundle
+        const seedValues = [];
+        for (let i = 0; i < seed.length; i += 2) {
+          seedValues.push(parseInt(seed.substring(i, i+2), 16));
+        }
+        
+        // Apply transformations using seed values
+        let result = input;
+        for (let i = 0; i < seedValues.length && i < 8; i++) {
+          const value = seedValues[i];
+          const position = value % result.length;
+          const charCode = result.charCodeAt(position);
+          
+          // Different transformations based on seed value
+          if (value % 4 === 0) {
+            result = result.substring(position) + result.substring(0, position);
+          } else if (value % 4 === 1) {
+            result = await sha256(result + value.toString());
+          } else if (value % 4 === 2) {
+            result = result.split('').reverse().join('');
+          } else {
+            result = await sha256(value.toString() + result);
+          }
+        }
+        
+        return result;
+      }
+      
+      // Round-specific transformation function
+      async function applyRoundTransformation(input, round, seed) {
+        // Select transformation based on round number and seed
+        const transformType = (parseInt(seed.substring(round % seed.length, round % seed.length + 2), 16) + round) % 5;
+        
+        switch (transformType) {
+          case 0: // Reverse substrings
+            const mid = Math.floor(input.length / 2);
+            return input.substring(mid) + input.substring(0, mid);
+            
+          case 1: // XOR with round number
+            return input.split('').map((char, i) => 
+              String.fromCharCode(char.charCodeAt(0) ^ ((round + 1) * (i + 1) % 256))
+            ).join('');
+            
+          case 2: // Interleave halves
+            const firstHalf = input.substring(0, input.length/2);
+            const secondHalf = input.substring(input.length/2);
+            let interleaved = '';
+            for (let i = 0; i < firstHalf.length; i++) {
+              interleaved += firstHalf[i] + (secondHalf[i] || '');
+            }
+            return interleaved;
+            
+          case 3: // Add round signature
+            return await sha256(input + round.toString().repeat(round + 1));
+            
+          case 4: // Rotate by round number
+            const rotation = (round + 1) * 3 % input.length;
+            return input.substring(rotation) + input.substring(0, rotation);
+            
+          default:
+            return input;
+        }
+      }`
+    }
+  ]
+};
+
 const webglTests = {
   // Variations that can be randomly selected and customized
   variations: [
@@ -424,6 +555,7 @@ const automationTests = {
 }
 
 module.exports = {
+  tokenTests,
   webglTests,
   timingTests,
   environmentTests,

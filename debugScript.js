@@ -2,7 +2,7 @@ const cors = require('cors');
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { buildBundles } = require('./src/js/build-logic/build-bundles');
+const { buildBundles } = require('./src/build-bundles/build-bundles');
 
 // Create debug server
 async function startDebugServer(port = 3000) {
@@ -29,7 +29,7 @@ async function startDebugServer(port = 3000) {
   }
   
   // Copy frontend files to debug directory
-  const sourceDir = path.join(__dirname, '..', 'build-files');
+  const sourceDir = path.join(__dirname, 'build-files');
   copyFrontendFiles(sourceDir, debugDir);
   
   // Create Express app
