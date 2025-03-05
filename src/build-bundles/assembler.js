@@ -9,7 +9,8 @@ const testTemplates = loadAllTestTemplates();
 function loadAllTestTemplates() {
     try {
       // Import test template modules
-      const { 
+      const {
+        tokenTests,
         webglTests, 
         timingTests, 
         environmentTests, 
@@ -22,6 +23,7 @@ function loadAllTestTemplates() {
   
       // Return combined templates object
       return {
+        tokenTests,
         webglTests, 
         timingTests, 
         environmentTests, 
@@ -203,32 +205,37 @@ function selectRandomDummyTests(templates, seed, excludeIds, options = {}) {
 // Select a mix of tests
 function selectTests(seed, templates) {
     // Always include token verification test
-    const tokenVerificationTest = selectMultipleFromCategory(templates, 'tokenTests', {
+    const tokenTests = selectMultipleFromCategory(templates, 'tokenTests', {
       include: ['token_verification']
     });
 
     const webglTests = selectMultipleFromCategory(templates, 'webglTests', {
-      count: 1, // Always include exactly 1 WebGL test
-      randomize: false // Always select the primary test
+      include: ['webgl_basic']
     });
     
     const timingTests = selectMultipleFromCategory(templates, 'timingTests', {
-      count: 2 + (parseInt(seed.substring(0, 2), 16) % 3), // 2-4 timing tests
-      randomize: true,
+      maxCount: 2 + (parseInt(seed.substring(0, 2), 16) % 3), // 2-4 timing tests
       seed: seed + '_timing'
     });
     
-    const fingerprintTests = selectMultipleFromCategory(templates, 'environmentTests', {
-      count: 1,
-      randomize: false,
-      specificId: 'browser_fingerprint' // Force inclusion of this specific test
+    const environmentTests = selectMultipleFromCategory(templates, 'environmentTests', {
+      maxCount: 2 + (parseInt(seed.substring(0, 2), 16) % 3), // 2-4 environment tests
+      include: ['browser_fingerprint'],
+      seed: seed + '_environment'
     });
     
+    const networkTests = selectMultipleFromCategory(templates, 'networkTests', {
+      maxCount: 2 + (parseInt(seed.substring(0, 2), 16) % 3), // 2-4 network test
+      seed: seed + '_network'
+    });
+
     // Combine all tests and mark them as real tests
     const coreTests = [
+      ...tokenTests,
       ...webglTests,
       ...timingTests,
-      ...fingerprintTests
+      ...environmentTests,
+      ...networkTests
     ].map(test => ({ ...test, isRealTest: true }));
     
     // Select dummy tests from any category
@@ -238,294 +245,36 @@ function selectTests(seed, templates) {
     return [...coreTests, ...dummyTests];
 }
   
-  /**
- * Orders real tests respecting dependencies between tests and resource usage
- * @param {Array<Object>} realTests - Array of real tests
- * @param {PseudoRandom} rng - Random number generator
- * @return {Array<Object>} - Ordered array of real tests
- */
-function orderRealTestsWithDependencies(realTests, rng) {
-    // If there are only a few tests, we can just shuffle them all
-    // since we don't have strong dependencies
-    if (realTests.length <= 3) {
-      const shuffled = [...realTests];
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(rng.next() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-      }
-      return shuffled;
-    }
-    
-    // For more complex test sets, categorize tests by type
-    
-    // Core tests that establish environment and capabilities
-    const fingerprintTests = realTests.filter(test => 
-      test.id.includes('fingerprint') || 
-      test.originalId?.includes('fingerprint') ||
-      test.id.startsWith('environment_') || 
-      test.originalId?.startsWith('environment_')
-    );
-    
-    // Hardware capability tests
-    const webGLTests = realTests.filter(test => 
-      test.id.startsWith('webgl_') || 
-      test.originalId?.startsWith('webgl_')
-    );
-    
-    // Performance measurement tests
-    const timingTests = realTests.filter(test => 
-      test.id.startsWith('timing_') || 
-      test.originalId?.startsWith('timing_')
-    );
-    
-    // Security environment tests
-    const deviceIntegrityTests = realTests.filter(test =>
-      test.id.startsWith('integrity_') ||
-      test.originalId?.startsWith('integrity_') ||
-      test.id.includes('device') ||
-      test.originalId?.includes('device')
-    );
-    
-    // Network behavior tests
-    const networkTests = realTests.filter(test =>
-      test.id.startsWith('network_') ||
-      test.originalId?.startsWith('network_')
-    );
-    
-    // Automation detection tests
-    const automationTests = realTests.filter(test =>
-      test.id.startsWith('automation_') ||
-      test.originalId?.startsWith('automation_')
-    );
-    
-    // Interactive behavior tests
-    const interactionTests = realTests.filter(test =>
-      test.id.startsWith('interaction_') ||
-      test.originalId?.startsWith('interaction_')
-    );
-    
-    // Input behavior tests
-    const inputTests = realTests.filter(test =>
-      test.id.startsWith('input_') ||
-      test.originalId?.startsWith('input_')
-    );
-    
-    // Any tests that don't fit the defined categories
-    const otherTests = realTests.filter(test => 
-      !webGLTests.includes(test) && 
-      !fingerprintTests.includes(test) && 
-      !timingTests.includes(test) &&
-      !deviceIntegrityTests.includes(test) &&
-      !networkTests.includes(test) &&
-      !automationTests.includes(test) &&
-      !interactionTests.includes(test) &&
-      !inputTests.includes(test)
-    );
-    
-    // Create ordered test sequence with optimal dependencies
-    const orderedTests = [];
-    
-    // PHASE 1: Environment baseline - start with tests that establish what we're working with
-    
-    // 1. Start with fingerprint/environment test to establish browser identity
-    if (fingerprintTests.length > 0) {
-      orderedTests.push(fingerprintTests[0]);
-      fingerprintTests.splice(0, 1);
-    }
-    
-    // 2. Add a device integrity test early to detect compromised environments
-    if (deviceIntegrityTests.length > 0) {
-      orderedTests.push(deviceIntegrityTests[0]);
-      deviceIntegrityTests.splice(0, 1);
-    }
-    
-    // 3. Add one WebGL test early to establish hardware capability
-    if (webGLTests.length > 0) {
-      orderedTests.push(webGLTests[0]);
-      webGLTests.splice(0, 1);
-    }
-    
-    // 4. Add one timing test to establish performance baseline
-    if (timingTests.length > 0) {
-      orderedTests.push(timingTests[0]);
-      timingTests.splice(0, 1);
-    }
-    
-    // PHASE 2: Create pools of remaining tests to intersperse
-    
-    // First pool: Tests that are resource-intensive and should be spaced out
-    const resourceIntensiveTests = [
-      ...webGLTests,
-      ...networkTests
-    ];
-    
-    // Second pool: Tests that provide additional security signals
-    const securityTests = [
-      ...deviceIntegrityTests,
-      ...automationTests
-    ];
-    
-    // Third pool: Tests that measure user behavior
-    const behaviorTests = [
-      ...interactionTests,
-      ...inputTests
-    ];
-    
-    // Final pool: Remaining tests to fill gaps
-    const remainingTests = [
-      ...fingerprintTests,
-      ...timingTests,
-      ...otherTests
-    ];
-    
-    // Shuffle each pool with seeded randomness for unpredictability
-    function shufflePool(pool) {
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(rng.next() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
-      }
-      return pool;
-    }
-    
-    shufflePool(resourceIntensiveTests);
-    shufflePool(securityTests);
-    shufflePool(behaviorTests);
-    shufflePool(remainingTests);
-    
-    // PHASE 3: Intersperse tests from different pools to create balanced sequence
-    
-    // Calculate how to distribute tests (aim for even distribution)
-    const totalRemaining = resourceIntensiveTests.length + 
-                           securityTests.length +
-                           behaviorTests.length + 
-                           remainingTests.length;
-    
-    if (totalRemaining === 0) {
-      return orderedTests; // Return what we have if no more tests
-    }
-    
-    // Calculate rough spacing between similar test types
-    const approximateGap = Math.max(1, Math.ceil(totalRemaining / 4));
-    
-    // Build the sequence by alternating between pools
-    while (resourceIntensiveTests.length > 0 || 
-           securityTests.length > 0 || 
-           behaviorTests.length > 0 || 
-           remainingTests.length > 0) {
-      
-      // Add a resource intensive test if available (but not consecutive ones)
-      if (resourceIntensiveTests.length > 0 && 
-          (orderedTests.length === 0 || 
-          !resourceIntensiveTests.includes(orderedTests[orderedTests.length - 1]))) {
-        orderedTests.push(resourceIntensiveTests.shift());
-      }
-      
-      // Add a security test if available
-      if (securityTests.length > 0) {
-        orderedTests.push(securityTests.shift());
-      }
-      
-      // Add behavior tests in small groups (they often work together)
-      const behaviorTestsToAdd = Math.min(
-        behaviorTests.length,
-        1 + Math.floor(rng.next() * 2) // Add 1-2 behavior tests in sequence
-      );
-      
-      for (let i = 0; i < behaviorTestsToAdd; i++) {
-        orderedTests.push(behaviorTests.shift());
-      }
-      
-      // Fill with remaining tests
-      if (remainingTests.length > 0) {
-        orderedTests.push(remainingTests.shift());
-      }
-    }
-    
-    return orderedTests;
-  }
-
 /**
  * Shuffles the order of tests in a deterministic way based on seed
- * Ensures critical test dependencies are maintained while randomizing order
+ * Places tests in completely random order with no dependencies
  * 
  * @param {Array<Object>} tests - Array of selected tests
  * @param {string} seed - Random seed for shuffling
  * @return {Array<Object>} - Shuffled test array
  */
 function shuffleTests(tests, seed) {
-    // Create a seeded random number generator
-    const seedInt = parseInt(seed.substring(0, 8), 16);
-    const rng = new PseudoRandom(seedInt);
-    
-    // First, separate real tests and dummy tests
-    const realTests = tests.filter(test => test.isRealTest);
-    const dummyTests = tests.filter(test => !test.isRealTest);
-    
-    // Shuffle dummy tests (these can go anywhere)
-    const shuffledDummyTests = [...dummyTests];
-    for (let i = shuffledDummyTests.length - 1; i > 0; i--) {
-      const j = Math.floor(rng.next() * (i + 1));
-      [shuffledDummyTests[i], shuffledDummyTests[j]] = [shuffledDummyTests[j], shuffledDummyTests[i]];
-    }
-    
-    // Create a sequence for real tests that respects dependencies
-    // Critical tests like fingerprinting may need to remain in a specific relative order
-    const orderedRealTests = orderRealTestsWithDependencies(realTests, rng);
-    
-    // Now we need to interleave the dummy tests between the real tests
-    const finalTestSequence = [];
-    
-    // Interleave in a way that doesn't put too many dummy tests together
-    // This makes it harder to identify which are the real tests
-    if (shuffledDummyTests.length === 0) {
-      // If no dummy tests, just use the ordered real tests
-      return orderedRealTests;
-    } else {
-      // Distribute dummy tests between real tests
-      // We'll create slots between real tests where dummy tests can go
-      
-      // Start with the first real test (always keep this first for proper initialization)
-      finalTestSequence.push(orderedRealTests[0]);
-      
-      // Initialize dummy test index
-      let dummyIndex = 0;
-      
-      // For each gap between real tests
-      for (let i = 1; i < orderedRealTests.length; i++) {
-        // Decide how many dummy tests to insert before the next real test
-        const maxDummiesToInsert = Math.min(
-          shuffledDummyTests.length - dummyIndex,
-          // Use RNG to determine how many dummy tests to insert (0-3)
-          Math.floor(rng.next() * 4)
-        );
-        
-        // Insert the determined number of dummy tests
-        for (let j = 0; j < maxDummiesToInsert; j++) {
-          if (dummyIndex < shuffledDummyTests.length) {
-            finalTestSequence.push(shuffledDummyTests[dummyIndex]);
-            dummyIndex++;
-          }
-        }
-        
-        // Add the next real test
-        finalTestSequence.push(orderedRealTests[i]);
-      }
-      
-      // Add any remaining dummy tests at the end
-      while (dummyIndex < shuffledDummyTests.length) {
-        finalTestSequence.push(shuffledDummyTests[dummyIndex]);
-        dummyIndex++;
-      }
-    }
-    
-    // Record the shuffle mapping for verification purposes
-    finalTestSequence.forEach((test, index) => {
-      test.originalIndex = tests.findIndex(t => t.id === test.id);
-      test.shuffledIndex = index;
-    });
-    
-    return finalTestSequence;
+  // Create a seeded random number generator
+  const seedInt = parseInt(seed.substring(0, 8), 16);
+  const rng = new PseudoRandom(seedInt);
+  
+  // Create a copy of all tests to shuffle
+  const allTests = [...tests];
+  
+  // Fisher-Yates shuffle with seeded RNG
+  for (let i = allTests.length - 1; i > 0; i--) {
+    const j = Math.floor(rng.next() * (i + 1));
+    [allTests[i], allTests[j]] = [allTests[j], allTests[i]];
   }
+  
+  // Record the shuffle mapping for verification purposes
+  allTests.forEach((test, index) => {
+    test.originalIndex = tests.findIndex(t => t.id === test.id);
+    test.shuffledIndex = index;
+  });
+  
+  return allTests;
+}
   
 /**
  * Generates parameter values for a test based on its paramRanges and a seed
@@ -533,57 +282,62 @@ function shuffleTests(tests, seed) {
  * @param {string} seed - Seed for deterministic parameter generation
  * @return {Object} - Object mapping parameter names to values
  */
-function generateTestParams(test, seed) {
-    // If test has no parameter ranges, return empty object
-    if (!test.paramRanges) {
-      return {};
+function generateTestParams(test, seed, bundleParams = {}) {
+  // If test has no parameter ranges, return empty object
+  if (!test.paramRanges) {
+    return {};
+  }
+  
+  // Create a deterministic random number generator
+  const seedInt = parseInt(seed.substring(0, 8), 16);
+  const rng = new PseudoRandom(seedInt);
+  
+  const paramValues = {};
+  
+  // Process each parameter in the ranges
+  Object.entries(test.paramRanges).forEach(([paramName, range]) => {
+    // Handle different parameter types
+    if (Array.isArray(range)) {
+      // Parameter is an array of possible values - select one randomly
+      const index = Math.floor(rng.next() * range.length);
+      paramValues[paramName] = range[index];
+    } else if (range === "DYNAMIC") {
+      // Generate a dynamic value based on seed
+      // Here we create a large random number between 10000-99999
+      paramValues[paramName] = 10000 + Math.floor(rng.next() * 90000);
+    } else if (range === "BUNDLE_TRANSFORM_SEED") {
+      // Use the provided bundle-specific transform seed
+      // If not provided, generate a new one
+      paramValues[paramName] = bundleParams.transformSeed || 
+        crypto.randomBytes(16).toString('hex');
+    } else if (typeof range === 'object' && range !== null) {
+      // Handle range object with min/max/step values
+      const { min, max, step = 1 } = range;
+      const steps = Math.floor((max - min) / step) + 1;
+      const value = min + (Math.floor(rng.next() * steps) * step);
+      paramValues[paramName] = value;
+    } else if (typeof range === 'number') {
+      // If the parameter is just a single number, use it directly
+      paramValues[paramName] = range;
+    } else if (typeof range === 'string') {
+      // String constant
+      paramValues[paramName] = range;
+    } else {
+      // Default case - generate a random number between 0-999
+      paramValues[paramName] = Math.floor(rng.next() * 1000);
     }
-    
-    // Create a deterministic random number generator
-    const seedInt = parseInt(seed.substring(0, 8), 16);
-    const rng = new PseudoRandom(seedInt);
-    
-    const paramValues = {};
-    
-    // Process each parameter in the ranges
-    Object.entries(test.paramRanges).forEach(([paramName, range]) => {
-      // Handle different parameter types
-      if (Array.isArray(range)) {
-        // Parameter is an array of possible values - select one randomly
-        const index = Math.floor(rng.next() * range.length);
-        paramValues[paramName] = range[index];
-      } else if (range === "DYNAMIC") {
-        // Generate a dynamic value based on seed
-        // Here we create a large random number between 10000-99999
-        paramValues[paramName] = 10000 + Math.floor(rng.next() * 90000);
-      } else if (typeof range === 'object' && range !== null) {
-        // Handle range object with min/max/step values
-        const { min, max, step = 1 } = range;
-        const steps = Math.floor((max - min) / step) + 1;
-        const value = min + (Math.floor(rng.next() * steps) * step);
-        paramValues[paramName] = value;
-      } else if (typeof range === 'number') {
-        // If the parameter is just a single number, use it directly
-        paramValues[paramName] = range;
-      } else if (typeof range === 'string') {
-        // String constant
-        paramValues[paramName] = range;
-      } else {
-        // Default case - generate a random number between 0-999
-        paramValues[paramName] = Math.floor(rng.next() * 1000);
-      }
-    });
-    
-    // Add additional entropy params that can be used for uniqueness
-    paramValues['PARAM_UNIQUE_ID'] = crypto.createHash('sha256')
-      .update(seed)
-      .digest('hex')
-      .substring(0, 16);
-    
-    // Add timestamp-based parameter (changes on each build but remains constant in a bundle)
-    paramValues['PARAM_TIMESTAMP'] = Date.now();
-    
-    return paramValues;
+  });
+  
+  // Add additional entropy params that can be used for uniqueness
+  paramValues['PARAM_UNIQUE_ID'] = crypto.createHash('sha256')
+    .update(seed)
+    .digest('hex')
+    .substring(0, 16);
+  
+  // Add timestamp-based parameter (changes on each build but remains constant in a bundle)
+  paramValues['PARAM_TIMESTAMP'] = Date.now();
+  
+  return paramValues;
 }
 
 function createTestChain(testOrder, seed) {
@@ -909,15 +663,6 @@ window.CaptchaSystem = {
     console.log("Starting verification for challenge:", challenge.id);
     
     try {
-
-      // Verify the token matches this bundle
-      if (challenge.token !== '${bundledToken}') {
-        console.error("Token mismatch - possible forgery attempt");
-        return { 
-          success: false, 
-          error: "Invalid token"
-        };
-      }
 
       // Step 1: Perform proof of work
       console.log("Running proof of work...");

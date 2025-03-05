@@ -124,7 +124,10 @@ const tokenTests = {
           default:
             return input;
         }
-      }`
+      }`,
+      paramRanges: {
+        PARAM_TRANSFORM_SEED: "BUNDLE_TRANSFORM_SEED"
+      },
     }
   ]
 };
@@ -416,7 +419,6 @@ const timingTests = {
           return result;
         }
       `,
-      dependencies: [],
       paramRanges: {
         PARAM_BASE_COUNT: [100000, 300000, 500000, 1000000],
         PARAM_LOOP_FACTOR: [10000, 20000, 50000]
@@ -528,8 +530,7 @@ const environmentTests = {
             previousHashFragment: params.previousHash.substring(0, 8)
           };
         }
-      `,
-      dependencies: []
+      `
     }
   ]
 };
