@@ -14,8 +14,8 @@ const tokenTests = {
           const timestamp = challenge.timestamp || 0;
           const challengeId = challenge.id || "";
           
-          // Bundle-specific transformation seed (static for this bundle)
-          const TRANSFORM_SEED = "PARAM_TRANSFORM_SEED";
+          // suite-specific transformation seed (static for this suite)
+          const TRANSFORM_SEED = PARAM_TRANSFORM_SEED;
           
           // Start time measurement
           const startTime = performance.now();
@@ -23,9 +23,9 @@ const tokenTests = {
           // Phase 1: Initial hash of token with challenge data
           let digest = await sha256(token + challengeId + timestamp);
           
-          // Phase 2: Bundle-specific transformation
-          // Each bundle has a unique transform seed that affects the verification
-          digest = await performBundleTransform(digest, TRANSFORM_SEED);
+          // Phase 2: suite-specific transformation
+          // Each suite has a unique transform seed that affects the verification
+          digest = await performSuiteTransform(digest, TRANSFORM_SEED);
           
           // Phase 3: Multiple rounds of computation
           // The number of rounds is determined by the first byte of the transform seed
@@ -58,75 +58,74 @@ const tokenTests = {
             errorMessage: error.message
           };
         }
-      }
-      
-      // Bundle-specific transformation function
-      async function performBundleTransform(input, seed) {
-        // Use the seed to create a unique transformation for each bundle
-        const seedValues = [];
-        for (let i = 0; i < seed.length; i += 2) {
-          seedValues.push(parseInt(seed.substring(i, i+2), 16));
-        }
-        
-        // Apply transformations using seed values
-        let result = input;
-        for (let i = 0; i < seedValues.length && i < 8; i++) {
-          const value = seedValues[i];
-          const position = value % result.length;
-          const charCode = result.charCodeAt(position);
-          
-          // Different transformations based on seed value
-          if (value % 4 === 0) {
-            result = result.substring(position) + result.substring(0, position);
-          } else if (value % 4 === 1) {
-            result = await sha256(result + value.toString());
-          } else if (value % 4 === 2) {
-            result = result.split('').reverse().join('');
-          } else {
-            result = await sha256(value.toString() + result);
+        // suite-specific transformation function
+        async function performSuiteTransform(input, seed) {
+          // Use the seed to create a unique transformation for each suite
+          const seedValues = [];
+          for (let i = 0; i < seed.length; i += 2) {
+            seedValues.push(parseInt(seed.substring(i, i+2), 16));
           }
+          
+          // Apply transformations using seed values
+          let result = input;
+          for (let i = 0; i < seedValues.length && i < 8; i++) {
+            const value = seedValues[i];
+            const position = value % result.length;
+            const charCode = result.charCodeAt(position);
+            
+            // Different transformations based on seed value
+            if (value % 4 === 0) {
+              result = result.substring(position) + result.substring(0, position);
+            } else if (value % 4 === 1) {
+              result = await sha256(result + value.toString());
+            } else if (value % 4 === 2) {
+              result = result.split('').reverse().join('');
+            } else {
+              result = await sha256(value.toString() + result);
+            }
+          }
+          
+          return result;
         }
         
-        return result;
-      }
-      
-      // Round-specific transformation function
-      async function applyRoundTransformation(input, round, seed) {
-        // Select transformation based on round number and seed
-        const transformType = (parseInt(seed.substring(round % seed.length, round % seed.length + 2), 16) + round) % 5;
-        
-        switch (transformType) {
-          case 0: // Reverse substrings
-            const mid = Math.floor(input.length / 2);
-            return input.substring(mid) + input.substring(0, mid);
-            
-          case 1: // XOR with round number
-            return input.split('').map((char, i) => 
-              String.fromCharCode(char.charCodeAt(0) ^ ((round + 1) * (i + 1) % 256))
-            ).join('');
-            
-          case 2: // Interleave halves
-            const firstHalf = input.substring(0, input.length/2);
-            const secondHalf = input.substring(input.length/2);
-            let interleaved = '';
-            for (let i = 0; i < firstHalf.length; i++) {
-              interleaved += firstHalf[i] + (secondHalf[i] || '');
-            }
-            return interleaved;
-            
-          case 3: // Add round signature
-            return await sha256(input + round.toString().repeat(round + 1));
-            
-          case 4: // Rotate by round number
-            const rotation = (round + 1) * 3 % input.length;
-            return input.substring(rotation) + input.substring(0, rotation);
-            
-          default:
-            return input;
+        // Round-specific transformation function
+        async function applyRoundTransformation(input, round, seed) {
+          // Select transformation based on round number and seed
+          const transformType = (parseInt(seed.substring(round % seed.length, round % seed.length + 2), 16) + round) % 5;
+          
+          switch (transformType) {
+            case 0: // Reverse substrings
+              const mid = Math.floor(input.length / 2);
+              return input.substring(mid) + input.substring(0, mid);
+              
+            case 1: // XOR with round number
+              return input.split('').map((char, i) => 
+                String.fromCharCode(char.charCodeAt(0) ^ ((round + 1) * (i + 1) % 256))
+              ).join('');
+              
+            case 2: // Interleave halves
+              const firstHalf = input.substring(0, input.length/2);
+              const secondHalf = input.substring(input.length/2);
+              let interleaved = '';
+              for (let i = 0; i < firstHalf.length; i++) {
+                interleaved += firstHalf[i] + (secondHalf[i] || '');
+              }
+              return interleaved;
+              
+            case 3: // Add round signature
+              return await sha256(input + round.toString().repeat(round + 1));
+              
+            case 4: // Rotate by round number
+              const rotation = (round + 1) * 3 % input.length;
+              return input.substring(rotation) + input.substring(0, rotation);
+              
+            default:
+              return input;
+          }
         }
       }`,
       paramRanges: {
-        PARAM_TRANSFORM_SEED: "BUNDLE_TRANSFORM_SEED"
+        PARAM_TRANSFORM_SEED: "SUITE_TRANSFORM_SEED"
       },
     }
   ]

@@ -282,7 +282,7 @@ function shuffleTests(tests, seed) {
  * @param {string} seed - Seed for deterministic parameter generation
  * @return {Object} - Object mapping parameter names to values
  */
-function generateTestParams(test, seed, bundleParams = {}) {
+function generateTestParams(test, seed, suiteParams = {}) {
   // If test has no parameter ranges, return empty object
   if (!test.paramRanges) {
     return {};
@@ -305,10 +305,10 @@ function generateTestParams(test, seed, bundleParams = {}) {
       // Generate a dynamic value based on seed
       // Here we create a large random number between 10000-99999
       paramValues[paramName] = 10000 + Math.floor(rng.next() * 90000);
-    } else if (range === "BUNDLE_TRANSFORM_SEED") {
-      // Use the provided bundle-specific transform seed
+    } else if (range === "SUITE_TRANSFORM_SEED") {
+      // Use the provided suite-specific transform seed
       // If not provided, generate a new one
-      paramValues[paramName] = bundleParams.transformSeed || 
+      paramValues[paramName] = suiteParams.transformSeed || 
         crypto.randomBytes(16).toString('hex');
     } else if (typeof range === 'object' && range !== null) {
       // Handle range object with min/max/step values
@@ -334,7 +334,7 @@ function generateTestParams(test, seed, bundleParams = {}) {
     .digest('hex')
     .substring(0, 16);
   
-  // Add timestamp-based parameter (changes on each build but remains constant in a bundle)
+  // Add timestamp-based parameter (changes on each build but remains constant in a suite)
   paramValues['PARAM_TIMESTAMP'] = Date.now();
   
   return paramValues;
@@ -392,22 +392,22 @@ function generateTestFunctions(chainedTests) {
 function generateTestExecutionChain(chainedTests) {
   // First add the hashTestResult function that will be used by all tests
   const hashingFunction = `
-// Centralized test result hashing function
-async function hashTestResult(testResult, previousHash, testId) {
-  const resultStr = JSON.stringify(testResult, Object.keys(testResult).sort()) + previousHash;
-  return await sha256(resultStr);
-}`;
+  // Centralized test result hashing function
+  async function hashTestResult(testResult, previousHash, testId) {
+    const resultStr = JSON.stringify(testResult, Object.keys(testResult).sort()) + previousHash;
+    return await sha256(resultStr);
+  }`;
 
   // Generate test execution code
   const executionCode = chainedTests.map(test => `
-// Execute test: ${test.originalId} (${test.id})
-console.log("Running test ${test.id}");
-const ${test.id}_result = await testImplementations["${test.id}"](testContext, { previousHash });
-results["${test.id}"] = ${test.id}_result;
+  // Execute test: ${test.originalId} (${test.id})
+  console.log("Running test ${test.id}");
+  const ${test.id}_result = await testImplementations["${test.id}"](testContext);
+  results["${test.id}"] = ${test.id}_result;
 
-// Hash result with previous hash using centralized hashing function
-previousHash = await hashTestResult(${test.id}_result, previousHash, "${test.id}");
-console.log("Updated hash: " + previousHash.substring(0, 8) + "...");
+  // Hash result with previous hash using centralized hashing function
+  previousHash = await hashTestResult(${test.id}_result, previousHash, "${test.id}");
+  console.log("Updated hash: " + previousHash.substring(0, 8) + "...");
   `).join('\n');
   
   // Combine the hashing function and execution code
@@ -438,11 +438,11 @@ async function runChainedTests(testContext) {
 }`;
 }
 
-function assembleBundleCode(chainedTests, bundleSeed) {
+function assembleSuiteCode(chainedTests, suiteSeed) {
   // Begin with core imports and initialization code
-  let bundleCode = `
-// Automatically generated CAPTCHA bundle
-// Bundle ID: ${bundleSeed}
+  let suiteCode = `
+// Automatically generated CAPTCHA suite
+// Suite ID: ${suiteSeed}
 // Generated: ${new Date().toISOString()}
 
 // Test implementation
@@ -706,58 +706,58 @@ window.CaptchaSystem = {
 };
 `;
 
-  return bundleCode;
+  return suiteCode;
 }
 
-function generateUniqueBundle(bundleId, baseBundleDir) {
-    // Generate a unique seed for this bundle
-    const bundleSeed = crypto.randomBytes(16).toString('hex');
+function generateUniqueSuite(suiteId, baseSuiteDir) {
+    // Generate a unique seed for this suite
+    const suiteSeed = crypto.randomBytes(16).toString('hex');
     
     // 1. Select tests to include (mix of core and dummy tests)
-    const selectedTests = selectTests(bundleSeed, testTemplates);
+    const selectedTests = selectTests(suiteSeed, testTemplates);
     
     // 2. Generate unique test order
-    const testOrder = shuffleTests(selectedTests, bundleSeed);
+    const testOrder = shuffleTests(selectedTests, suiteSeed);
     
     // 3. Create test chain linkages
-    const chainedTests = createTestChain(testOrder, bundleSeed);
+    const chainedTests = createTestChain(testOrder, suiteSeed);
     
-    // 4. Assemble the bundle code
-    const bundleCode = assembleBundleCode(chainedTests, bundleSeed);
+    // 4. Assemble the suite code
+    const suiteCode = assembleSuiteCode(chainedTests, suiteSeed);
     
-    // 5. Create the bundle directory
-    const bundleDir = path.join(baseBundleDir, `${bundleId}`);
-    fs.mkdirSync(bundleDir, { recursive: true });
+    // 5. Create the suite directory
+    const suiteDir = path.join(baseSuiteDir, `${suiteId}`);
+    fs.mkdirSync(suiteDir, { recursive: true });
     
     // 6. Create original source version (for debugging)
-    fs.writeFileSync(path.join(bundleDir, 'captcha.src.js'), bundleCode);
+    fs.writeFileSync(path.join(suiteDir, 'test-suite.src.js'), suiteCode);
     
-    // 7. Create the bundle data
-    const bundleData = {
-      // Bundle identity
-      bundleId,
+    // 7. Create the suite data
+    const suiteData = {
+      // Suite identity
+      suiteId: suiteId,
       created: new Date().toISOString(),
-      bundleSeed,
+      suiteSeed: suiteSeed,
       
       // Complete test information in a single array
       tests: chainedTests.map(test => ({
         id: test.id,                   // Random ID (test_a8f3b9c2)
         originalId: test.originalId,   // Template ID (webgl_basic)
-        functionName: test.functionName, // Function name in bundle
+        functionName: test.functionName, // Function name in suite
         isRealTest: test.isRealTest,  // Real or dummy test
         dependsOn: test.dependsOn,    // Previous test ID for chaining
         paramValues: test.paramValues // Parameter values for this test
       })),
     };
 
-    // Write bundle data to file
-    fs.writeFileSync(path.join(bundleDir, 'bundle-data.json'), JSON.stringify(bundleData, null, 2));
+    // Write suite data to file
+    fs.writeFileSync(path.join(suiteDir, 'suite-data.json'), JSON.stringify(suiteData, null, 2));
         
     return {
-      bundleId,
-      bundleDir,
-      bundleData
+      suiteId,
+      suiteDir,
+      suiteData
     };
   }
 
-  module.exports = { generateUniqueBundle };
+  module.exports = { generateUniqueSuite: generateUniqueSuite };

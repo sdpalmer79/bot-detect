@@ -2,25 +2,25 @@ const cors = require('cors');
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { buildBundles } = require('./src/build-bundles/build-bundles');
+const { buildSuites } = require('./build-test-suite/src/build');
 
 // Create debug server
 async function startDebugServer(port = 3000) {
   console.log('Starting CAPTCHA debug server...');
   
-  // Build a single bundle for testing
-  console.log('Building test bundle...');
-  const bundles = await buildBundles(1);
-  const testBundle = bundles[0];
-  console.log(`Created test bundle: ${testBundle.bundleId}`);
+  // Build a single suite for testing
+  console.log('Building test suite...');
+  const suites = await buildSuites(1);
+  const testSuite = suites[0];
+  console.log(`Created test suite: ${testSuite.suiteId}`);
   
-  // Get bundle paths
-  const bundleDir = testBundle.path;
-  const bundleJsPath = path.join(bundleDir, 'captcha.js');
-  const bundleDataPath = path.join(bundleDir, 'bundle-data.json');
+  // Get suite paths
+  const suiteDir = testSuite.path;
+  const suiteJsPath = path.join(suiteDir, 'test-suite.src.js');
+  const suiteDataPath = path.join(suiteDir, 'suite-data.json');
   
-  // Read bundle data
-  const bundleData = JSON.parse(fs.readFileSync(bundleDataPath, 'utf-8'));
+  // Read suite data
+  const suiteData = JSON.parse(fs.readFileSync(suiteDataPath, 'utf-8'));
   
   // Setup debug directory
   const debugDir = path.join(__dirname, 'debug');
@@ -29,7 +29,7 @@ async function startDebugServer(port = 3000) {
   }
   
   // Copy frontend files to debug directory
-  const sourceDir = path.join(__dirname, 'build-files');
+  const sourceDir = path.join(__dirname, 'captcha-site', 'public');
   copyFrontendFiles(sourceDir, debugDir);
   
   // Create Express app
@@ -48,12 +48,12 @@ async function startDebugServer(port = 3000) {
   // Serve static files from debug directory
   app.use(express.static(debugDir));
   
-  // Serve bundle file
-  app.get('/bundle/:bundleId', (req, res) => {
-    if (req.params.bundleId === testBundle.bundleId) {
-      res.sendFile(bundleJsPath);
+  // Serve suite file
+  app.get('/suite/:suiteId', (req, res) => {
+    if (req.params.suiteId === testSuite.suiteId) {
+      res.sendFile(suiteJsPath);
     } else {
-      res.status(404).send('Bundle not found');
+      res.status(404).send('suite not found');
     }
   });
   
@@ -68,8 +68,8 @@ async function startDebugServer(port = 3000) {
     // Generate a simple challenge
     const challenge = {
       id: `challenge-${Date.now()}`,
-      bundleId: testBundle.bundleId,
-      bundleUrl: `/bundle/${testBundle.bundleId}`,
+      suiteId: testSuite.suiteId,
+      suiteUrl: `/suite/${testSuite.suiteId}`,
       timestamp: Date.now(),
       token: 'debug-token-12345',
       powDifficulty: 2,  // Reduced for faster testing
@@ -87,7 +87,7 @@ async function startDebugServer(port = 3000) {
     console.log(JSON.stringify(req.body, null, 2));
     
     // For debug server, show detailed verification process
-    const verification = verifyResults(req.body, bundleData);
+    const verification = verifyResults(req.body, suiteData);
     
     console.log('Verification result:', verification);
     res.json(verification);
@@ -96,7 +96,7 @@ async function startDebugServer(port = 3000) {
   // Start server
   app.listen(port, () => {
     console.log(`Debug server running at http://localhost:${port}`);
-    console.log(`Test bundle ID: ${testBundle.bundleId}`);
+    console.log(`Test suite ID: ${testSuite.suiteId}`);
     console.log(`Debug frontend available at http://localhost:${port}/index.html`);
   });
 }
@@ -279,7 +279,7 @@ function injectDebugScript(htmlPath) {
 }
 
 // Basic verification logic
-function verifyResults(submission, bundleData) {
+function verifyResults(submission, suiteData) {
   // In debug mode, we just log the verification steps
   // In real implementation, this would do proper verification
   console.log('Verifying proof of work...');
@@ -290,7 +290,7 @@ function verifyResults(submission, bundleData) {
   
   console.log('Verifying test results...');
   // Check if all required tests have results
-  const realTests = bundleData.realTests || [];
+  const realTests = suiteData.realTests || [];
   const missingTests = realTests.filter(testId => 
     !submission.testResults || !submission.testResults[testId]
   );
@@ -301,7 +301,7 @@ function verifyResults(submission, bundleData) {
     testsComplete: missingTests.length === 0,
     missingTests: missingTests.length > 0 ? missingTests : undefined,
     debug: {
-      bundleId: bundleData.bundleId,
+      suiteId: suiteData.suiteId,
       realTests,
       receivedTests: Object.keys(submission.testResults || {})
     }

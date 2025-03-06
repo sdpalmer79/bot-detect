@@ -3,17 +3,17 @@ const path = require('path');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 const Terser = require('terser');
 
-async function obfuscateBundle(bundleInfo) {
-  const { bundleId, bundleDir } = bundleInfo;
+async function obfuscateSuite(suiteInfo) {
+  const { suiteId, suiteDir } = suiteInfo;
   
-  // Read the source bundle
-  let sourceCode = fs.readFileSync(path.join(bundleDir, 'captcha.src.js'), 'utf8');
+  // Read the source suite
+  let sourceCode = fs.readFileSync(path.join(suiteDir, 'test-suite.src.js'), 'utf8');
   
   // Add runtime debug protection
   sourceCode = addDebugProtections(sourceCode);
   
-  // Generate unique obfuscation options for this bundle
-  const obfuscationOptions = generateUniqueObfuscationOptions(bundleId);
+  // Generate unique obfuscation options for this suite
+  const obfuscationOptions = generateUniqueObfuscationOptions(suiteId);
   
   // Apply obfuscation
   const obfuscatedResult = JavaScriptObfuscator.obfuscate(
@@ -23,26 +23,26 @@ async function obfuscateBundle(bundleInfo) {
   
   // Save obfuscated code
   fs.writeFileSync(
-    path.join(bundleDir, 'captcha.js'),
+    path.join(suiteDir, 'test-suite.js'),
     obfuscatedResult.getObfuscatedCode()
   );
   
   // Save minified version
   const minified = await minifyCode(obfuscatedResult.getObfuscatedCode());
   fs.writeFileSync(
-    path.join(bundleDir, 'captcha.min.js'),
+    path.join(suiteDir, 'test-suite.min.js'),
     minified
   );
   
   return {
-    ...bundleInfo,
+    ...suiteInfo,
     obfuscationOptions
   };
 }
 
-function generateUniqueObfuscationOptions(bundleId) {
-  // Create pseudo-random but deterministic options based on bundleId
-  const seed = parseInt(bundleId.replace(/[^0-9]/g, '').substring(0, 8), 10);
+function generateUniqueObfuscationOptions(suiteId) {
+  // Create pseudo-random but deterministic options based on suiteId
+  const seed = parseInt(suiteId.replace(/[^0-9]/g, '').substring(0, 8), 10);
   const random = new PseudoRandom(seed);
   
   return {
@@ -375,4 +375,4 @@ function addDebugProtections(originalCode) {
   return originalCode + "\n" + protections;
 }
 
-module.exports = { obfuscateBundle };
+module.exports = { obfuscateSuite };

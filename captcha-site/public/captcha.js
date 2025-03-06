@@ -147,10 +147,10 @@
         // Create UI container
         createCaptchaContainer();
         
-        // Load the bundle
-        await loadCaptchaBundle(challenge.bundleUrl);
+        // Load the suite
+        await loadCaptchaSuite(challenge.suiteUrl);
         
-        // Let the bundle handle EVERYTHING related to verification
+        // Let the suite handle EVERYTHING related to verification
         if (window.CaptchaSystem && window.CaptchaSystem.verify) {
           updateStatus("Starting verification process...");
           
@@ -158,7 +158,7 @@
           const verificationResults = await window.CaptchaSystem.verify(challenge);
           
           // Submit results
-          await submitCaptchaResults(verificationResults);
+          await submitCaptchaResults(verificationResults, challenge);
         } else {
           showError("Verification system failed to load.");
         }
@@ -255,15 +255,15 @@
       return await response.json();
     }
     
-    function loadCaptchaBundle(bundleUrl) {
+    function loadCaptchaSuite(suiteUrl) {
       updateStatus("Loading verification...");
       
       return new Promise((resolve, reject) => {
         const script = document.createElement('script');
-        script.src = bundleUrl + '?t=' + Date.now() + '&token=' + encodeURIComponent(securityToken);
+        script.src = suiteUrl + '?t=' + Date.now() + '&token=' + encodeURIComponent(securityToken);
         script.onload = resolve;
         script.onerror = () => {
-          reject(new Error("Failed to load verification bundle"));
+          reject(new Error("Failed to load verification suite"));
         };
         document.head.appendChild(script);
       });
@@ -271,7 +271,7 @@
     
     
     // Submit all test results back to server for verification
-    async function submitCaptchaResults(verificationResults) {
+    async function submitCaptchaResults(verificationResults, challenge) {
       updateStatus("Completing verification...");
       
       // Get the stored request ID 
@@ -293,7 +293,7 @@
           },
           body: JSON.stringify({
             // Challenge identification
-            challengeId: captchaChallenge.id,
+            challengeId: challenge.id,
             initialRequestId: requestId,
             timestamp: Date.now(),
             token: securityToken,
