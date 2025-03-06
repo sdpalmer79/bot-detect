@@ -288,6 +288,8 @@ function verifyResults(submission, suiteData) {
                  submission.powResult.hash && 
                  submission.powResult.hash.startsWith('00');
   
+  evaluateTokenVerification(submission, suiteData);
+
   console.log('Verifying test results...');
   // Check if all required tests have results
   const realTests = suiteData.realTests || [];
@@ -315,3 +317,148 @@ if (require.main === module) {
 }
 
 module.exports = { startDebugServer };
+
+/**
+ * Evaluates token verification test results
+ * @param {Object} result - Client test result
+ * @param {Object} context - Server context with challenge data and suite info
+ * @returns {Object} Evaluation results
+ */
+function evaluateTokenVerification(result, context) {
+  // Extract server-side data
+  const { challenge, suiteData } = context;
+  const transformSeed = suiteData.transformSeed;
+  
+  // Calculate expected hash using the same algorithm
+  const expectedHash = calculateExpectedTokenHash(
+    challenge.token,
+    challenge.id,
+    challenge.timestamp,
+    transformSeed,
+    context.previousHash
+  );
+  
+  // Compare with received hash
+  const hashValid = (result.tokenHash === expectedHash.substring(0, 16));
+  
+  // Check timing for anomalies (extremely fast could indicate bypass)
+  const timingNormal = result.duration > 5; // Minimum reasonable time
+  
+  // Check for challenge expiration
+  const challengeExpired = Date.now() > (challenge.timestamp + 900000); // 15 minutes
+  
+  return {
+    valid: hashValid && timingNormal && !challengeExpired,
+    hashValid,
+    timingNormal,
+    challengeValid: !challengeExpired,
+    botProbability: hashValid ? 0 : 0.9, // Simple initial scoring
+    confidence: 0.9,
+    details: {
+      expectedHashPrefix: expectedHash.substring(0, 16),
+      receivedHashPrefix: result.tokenHash,
+      processingTime: result.duration
+    }
+  };
+}
+
+const crypto = require('crypto');
+
+/**
+ * Server-side implementation of the token hash calculation
+ * This mirrors the client algorithm exactly
+ */
+async function calculateExpectedTokenHash(token, challengeId, timestamp, transformSeed, previousHash) {
+  // Phase 1: Initial hash of token with challenge data
+  let digest = await sha256(token + challengeId + timestamp);
+  
+  // Phase 2: Suite-specific transformation
+  digest = await performSuiteTransform(digest, transformSeed);
+  
+  // Phase 3: Multiple rounds of computation
+  // The number of rounds is determined by the first byte of the transform seed
+  const rounds = (parseInt(transformSeed.substring(0, 2), 16) % 7) + 3; // 3-10 rounds
+  
+  for (let i = 0; i < rounds; i++) {
+    // Mix in the previous hash from the chain to connect verification to the test chain
+    digest = await sha256(digest + (i.toString()) + previousHash.substring(0, 8));
+    
+    // Apply additional transformations based on round number
+    digest = await applyRoundTransformation(digest, i, transformSeed);
+  }
+  
+  return digest;
+}
+
+// SHA-256 hash function for server-side validation
+async function sha256(message) {
+  return crypto
+    .createHash('sha256')
+    .update(String(message))
+    .digest('hex');
+}
+
+// Suite-specific transformation function
+async function performSuiteTransform(input, seed) {
+  // Use the seed to create a unique transformation for each suite
+  const seedValues = [];
+  for (let i = 0; i < seed.length; i += 2) {
+    seedValues.push(parseInt(seed.substring(i, i+2), 16));
+  }
+  
+  // Apply transformations using seed values
+  let result = input;
+  for (let i = 0; i < seedValues.length && i < 8; i++) {
+    const value = seedValues[i];
+    const position = value % result.length;
+    
+    // Different transformations based on seed value
+    if (value % 4 === 0) {
+      result = result.substring(position) + result.substring(0, position);
+    } else if (value % 4 === 1) {
+      result = await sha256(result + value.toString());
+    } else if (value % 4 === 2) {
+      result = result.split('').reverse().join('');
+    } else {
+      result = await sha256(value.toString() + result);
+    }
+  }
+  
+  return result;
+}
+
+// Round-specific transformation function
+async function applyRoundTransformation(input, round, seed) {
+  // Select transformation based on round number and seed
+  const transformType = (parseInt(seed.substring(round % seed.length, round % seed.length + 2), 16) + round) % 5;
+  
+  switch (transformType) {
+    case 0: // Reverse substrings
+      const mid = Math.floor(input.length / 2);
+      return input.substring(mid) + input.substring(0, mid);
+      
+    case 1: // XOR with round number
+      return input.split('').map((char, i) => 
+        String.fromCharCode(char.charCodeAt(0) ^ ((round + 1) * (i + 1) % 256))
+      ).join('');
+      
+    case 2: // Interleave halves
+      const firstHalf = input.substring(0, input.length/2);
+      const secondHalf = input.substring(input.length/2);
+      let interleaved = '';
+      for (let i = 0; i < firstHalf.length; i++) {
+        interleaved += firstHalf[i] + (secondHalf[i] || '');
+      }
+      return interleaved;
+      
+    case 3: // Add round signature
+      return await sha256(input + round.toString().repeat(round + 1));
+      
+    case 4: // Rotate by round number
+      const rotation = (round + 1) * 3 % input.length;
+      return input.substring(rotation) + input.substring(0, rotation);
+      
+    default:
+      return input;
+  }
+}

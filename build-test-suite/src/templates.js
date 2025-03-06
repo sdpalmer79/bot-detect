@@ -4,18 +4,16 @@ const tokenTests = {
     {
       id: "token_verification",
       description: "Performs verification of the challenge token",
-      code: `async function TEST_FUNCTION_NAME(testContext, chainData) {
+      code: `function TEST_FUNCTION_NAME(ctx, params) {
         try {
-          const { challenge } = testContext;
-          const { previousHash } = chainData;
-          
           // Extract required data from challenge
-          const token = challenge.token || "";
-          const timestamp = challenge.timestamp || 0;
-          const challengeId = challenge.id || "";
+          const token = ctx.token || "";
+          const timestamp = ctx.timestamp || 0;
+          const challengeId = ctx.id || "";
+          const previousHash = params.previousHash || "";
           
-          // suite-specific transformation seed (static for this suite)
-          const TRANSFORM_SEED = PARAM_TRANSFORM_SEED;
+          // Suite-specific transformation seed (static for this suite)
+          const TRANSFORM_SEED = "PARAM_TRANSFORM_SEED";
           
           // Start time measurement
           const startTime = performance.now();
@@ -23,8 +21,7 @@ const tokenTests = {
           // Phase 1: Initial hash of token with challenge data
           let digest = await sha256(token + challengeId + timestamp);
           
-          // Phase 2: suite-specific transformation
-          // Each suite has a unique transform seed that affects the verification
+          // Phase 2: Suite-specific transformation
           digest = await performSuiteTransform(digest, TRANSFORM_SEED);
           
           // Phase 3: Multiple rounds of computation
@@ -42,23 +39,21 @@ const tokenTests = {
           // Calculate completion time
           const duration = performance.now() - startTime;
           
-          // Return verification result
+          // Return verification result with minimal data
           return {
-            verified: true,
             tokenHash: digest.substring(0, 16), // Truncated hash value
-            duration,
-            rounds,
-            validUntil: timestamp + 900000, // Valid for 15 minutes
-            timestamp
+            duration: duration,
+            rounds: rounds,
+            processedAt: Date.now()
           };
         } catch (error) {
           return {
-            verified: false,
             error: "Token verification failed",
             errorMessage: error.message
           };
         }
-        // suite-specific transformation function
+        
+        // Suite-specific transformation function
         async function performSuiteTransform(input, seed) {
           // Use the seed to create a unique transformation for each suite
           const seedValues = [];
@@ -71,7 +66,6 @@ const tokenTests = {
           for (let i = 0; i < seedValues.length && i < 8; i++) {
             const value = seedValues[i];
             const position = value % result.length;
-            const charCode = result.charCodeAt(position);
             
             // Different transformations based on seed value
             if (value % 4 === 0) {
@@ -132,7 +126,6 @@ const tokenTests = {
 };
 
 const webglTests = {
-  // Variations that can be randomly selected and customized
   variations: [
     {
       id: "webgl_basic",
