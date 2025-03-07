@@ -418,7 +418,7 @@ function generateChainedTestRunner(chainedTests) {
   return `
 async function runChainedTests(testContext) {
   const results = {};
-  let previousHash = testContext.challenge?.powHash || "initial";
+  let previousHash = testContext.powHash || "initial";
   
   try {
     ${generateTestExecutionChain(chainedTests)}

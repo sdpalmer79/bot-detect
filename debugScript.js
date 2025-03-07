@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { buildSuites } = require('./build-test-suite/src/build');
+const crypto = require('crypto');
 
 // Create debug server
 async function startDebugServer(port = 3000) {
@@ -22,6 +23,18 @@ async function startDebugServer(port = 3000) {
   // Read suite data
   const suiteData = JSON.parse(fs.readFileSync(suiteDataPath, 'utf-8'));
   
+  // Generate a simple challenge - this would normally be done by the server per request and saved in a database
+  const challenge = {
+    id: `challenge-${Date.now()}`,
+    suiteId: testSuite.suiteId,
+    suiteUrl: `/suite/${testSuite.suiteId}`,
+    timestamp: Date.now(),
+    token: 'debug-token-12345',
+    powDifficulty: 2,  // Reduced for faster testing
+    powPrefix: 'debug',
+    expiry: Date.now() + 300000 // 5 minutes
+  };
+
   // Setup debug directory
   const debugDir = path.join(__dirname, 'debug');
   if (!fs.existsSync(debugDir)) {
@@ -64,30 +77,17 @@ async function startDebugServer(port = 3000) {
     
     // Log headers for debugging
     console.log('Request headers:', req.headers);
-    
-    // Generate a simple challenge
-    const challenge = {
-      id: `challenge-${Date.now()}`,
-      suiteId: testSuite.suiteId,
-      suiteUrl: `/suite/${testSuite.suiteId}`,
-      timestamp: Date.now(),
-      token: 'debug-token-12345',
-      powDifficulty: 2,  // Reduced for faster testing
-      powPrefix: 'debug',
-      expiry: Date.now() + 300000 // 5 minutes
-    };
-    
     console.log('Sending challenge:', challenge);
     res.json(challenge);
   });
   
   // API endpoint to verify captcha results
-  app.post('/api/verify-captcha', (req, res) => {
+  app.post('/api/verify-captcha', async (req, res) => {
     console.log('Verification received:');
     console.log(JSON.stringify(req.body, null, 2));
     
     // For debug server, show detailed verification process
-    const verification = verifyResults(req.body, suiteData);
+    const verification = await verifyResults(req.body, challenge, suiteData);
     
     console.log('Verification result:', verification);
     res.json(verification);
@@ -279,23 +279,38 @@ function injectDebugScript(htmlPath) {
 }
 
 // Basic verification logic
-function verifyResults(submission, suiteData) {
-  // In debug mode, we just log the verification steps
-  // In real implementation, this would do proper verification
+async function verifyResults(submission, challenge, suiteData) {
+  
+  // First check challenge expiration (independent of any test)
+  const expirationCheck = checkChallengeExpiration(challenge);
+  if (!expirationCheck.valid) {
+    console.log('Challenge expired:', expirationCheck);
+    return {
+      valid: false,
+      challengeExpired: true,
+      expirationDetails: expirationCheck,
+      message: "Challenge has expired"
+    };
+  }
+
   console.log('Verifying proof of work...');
-  // Simple validation of PoW - check if hash starts with zeros
   const powValid = submission.powResult && 
                  submission.powResult.hash && 
                  submission.powResult.hash.startsWith('00');
-  
-  evaluateTokenVerification(submission, suiteData);
 
   console.log('Verifying test results...');
-  // Check if all required tests have results
-  const realTests = suiteData.realTests || [];
-  const missingTests = realTests.filter(testId => 
-    !submission.testResults || !submission.testResults[testId]
-  );
+  suiteData.tests.filter((test) => test.isRealTest).forEach(test => {
+    console.log(`Verifying test ${original.id}...`);
+    const result = submission.challengeSolution.testResults[test.id];
+
+    switch (test.original.id) {
+      case 'token_verification':
+        await evaluateTokenVerification(result, challenge, suiteData);
+        break;
+      default:
+        console.log(`Unknown test type: ${test.original.id}`);
+        throw new Error('Unknown test type');
+    }
   
   return {
     valid: powValid && missingTests.length === 0,
@@ -319,56 +334,123 @@ if (require.main === module) {
 module.exports = { startDebugServer };
 
 /**
- * Evaluates token verification test results
- * @param {Object} result - Client test result
- * @param {Object} context - Server context with challenge data and suite info
- * @returns {Object} Evaluation results
+ * Standalone challenge expiration check
+ * @param {Object} challenge - Challenge data sent to client
+ * @returns {Object} Expiration status information
  */
-function evaluateTokenVerification(result, context) {
-  // Extract server-side data
-  const { challenge, suiteData } = context;
-  const transformSeed = suiteData.transformSeed;
-  
-  // Calculate expected hash using the same algorithm
-  const expectedHash = calculateExpectedTokenHash(
-    challenge.token,
-    challenge.id,
-    challenge.timestamp,
-    transformSeed,
-    context.previousHash
-  );
-  
-  // Compare with received hash
-  const hashValid = (result.tokenHash === expectedHash.substring(0, 16));
-  
-  // Check timing for anomalies (extremely fast could indicate bypass)
-  const timingNormal = result.duration > 5; // Minimum reasonable time
-  
-  // Check for challenge expiration
-  const challengeExpired = Date.now() > (challenge.timestamp + 900000); // 15 minutes
+function checkChallengeExpiration(challenge) {
+  const maxAge = 900000; // 15 minutes
+  const challengeAge = Date.now() - challenge.timestamp;
+  const challengeExpired = challengeAge > maxAge;
   
   return {
-    valid: hashValid && timingNormal && !challengeExpired,
-    hashValid,
-    timingNormal,
-    challengeValid: !challengeExpired,
-    botProbability: hashValid ? 0 : 0.9, // Simple initial scoring
-    confidence: 0.9,
-    details: {
-      expectedHashPrefix: expectedHash.substring(0, 16),
-      receivedHashPrefix: result.tokenHash,
-      processingTime: result.duration
-    }
+    valid: !challengeExpired,
+    challengeAge,
+    maxValidAge: maxAge,
+    expiryTime: challenge.timestamp + maxAge,
+    remainingTime: Math.max(0, (challenge.timestamp + maxAge) - Date.now())
   };
 }
 
-const crypto = require('crypto');
+/**
+ * Evaluates token verification test results
+ * @param {Object} result - Client test result
+ * @param {Object} challenge - Challenge data sent to client
+ * @param {Object} suiteData - Suite configuration data
+ * @returns {Object} Evaluation results with detailed verification information
+ */
+async function evaluateTokenVerification(result, challenge, suiteData) {
+  console.log('Evaluating token verification result:', result);
+  
+  try {
+    // Check if result is valid
+    if (!result || result.error) {
+      return {
+        valid: false,
+        hashValid: false,
+        error: result?.error || 'Invalid test result',
+        botProbability: 0.9,
+        confidence: 0.8
+      };
+    }
+    
+    // Extract required data
+    const token = challenge.token;
+    const challengeId = challenge.id;
+    const timestamp = challenge.timestamp;
+    const transformSeed = suiteData.transformSeed;
+    
+    // Calculate expected tokenHash using server-side implementation
+    const expectedHash = calculateClientCompatibleHash(
+      token, 
+      challengeId, 
+      timestamp, 
+      transformSeed
+    );
+    
+    // Compare with received hash
+    const hashValid = (result.tokenHash === expectedHash.substring(0, 16));
+    
+    // Check timing for anomalies
+    const executionTime = result.duration;
+    const timingNormal = executionTime > 5; // Minimum reasonable time
+    const timingSuspicious = executionTime < 10 || executionTime > 5000;
+    
+    // Check for challenge expiration
+    const maxAge = 900000; // 15 minutes
+    const challengeAge = Date.now() - timestamp;
+    const challengeExpired = challengeAge > maxAge;
+    
+    // Additional security checks
+    const expectedRounds = (parseInt(transformSeed.substring(0, 2), 16) % 7) + 3;
+    const roundsMatch = result.rounds === expectedRounds;
+    
+    // Calculate bot probability
+    let botProbability = 0.1; // Start with low probability
+    
+    if (!hashValid) botProbability += 0.6;
+    if (!roundsMatch) botProbability += 0.4;
+    if (!timingNormal) botProbability += 0.2;
+    if (timingSuspicious) botProbability += 0.1;
+    if (challengeExpired) botProbability += 0.2;
+    
+    // Cap probability between 0 and 1
+    botProbability = Math.min(Math.max(botProbability, 0), 1);
+    
+    return {
+      valid: hashValid && timingNormal && !challengeExpired && roundsMatch,
+      hashValid,
+      timingNormal,
+      roundsMatch,
+      challengeValid: !challengeExpired,
+      botProbability,
+      confidence: hashValid ? 0.95 : 0.8,
+      details: {
+        expectedHashPrefix: expectedHash.substring(0, 16),
+        receivedHashPrefix: result.tokenHash,
+        expectedRounds,
+        reportedRounds: result.rounds,
+        processingTime: result.duration,
+        challengeAge,
+        maxValidAge: maxAge
+      }
+    };
+  } catch (error) {
+    console.error('Error evaluating token verification:', error);
+    return {
+      valid: false,
+      error: error.message,
+      botProbability: 0.5,
+      confidence: 0.3
+    };
+  }
+}
 
 /**
- * Server-side implementation of the token hash calculation
- * This mirrors the client algorithm exactly
+ * Calculates token hash using the client algorithm
+ * This mirrors the client implementation exactly, without using previousHash
  */
-async function calculateExpectedTokenHash(token, challengeId, timestamp, transformSeed, previousHash) {
+async function calculateClientCompatibleHash(token, challengeId, timestamp, transformSeed) {
   // Phase 1: Initial hash of token with challenge data
   let digest = await sha256(token + challengeId + timestamp);
   
@@ -376,12 +458,11 @@ async function calculateExpectedTokenHash(token, challengeId, timestamp, transfo
   digest = await performSuiteTransform(digest, transformSeed);
   
   // Phase 3: Multiple rounds of computation
-  // The number of rounds is determined by the first byte of the transform seed
   const rounds = (parseInt(transformSeed.substring(0, 2), 16) % 7) + 3; // 3-10 rounds
   
   for (let i = 0; i < rounds; i++) {
-    // Mix in the previous hash from the chain to connect verification to the test chain
-    digest = await sha256(digest + (i.toString()) + previousHash.substring(0, 8));
+    // Use token substring instead of previousHash, matching client implementation
+    digest = await sha256(digest + (i.toString()) + token.substring(0, 8));
     
     // Apply additional transformations based on round number
     digest = await applyRoundTransformation(digest, i, transformSeed);
