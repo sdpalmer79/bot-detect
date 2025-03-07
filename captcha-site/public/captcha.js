@@ -158,7 +158,13 @@
           const verificationResults = await window.CaptchaSystem.verify(challenge);
           
           // Submit results
-          await submitCaptchaResults(verificationResults, challenge);
+          const verfication = await submitCaptchaResults(verificationResults, challenge);
+          // Handle successful verification
+          if (verfication.valid) {
+            showSuccess(verfication);
+          } else {
+            showError("Verification failed");
+          }
         } else {
           showError("Verification system failed to load.");
         }
@@ -320,8 +326,10 @@
             }
           })
         });
-        
-        // Process response...
+
+        const verfication = await response.json();
+        return verfication;
+
       } catch (error) {
         console.error("Error submitting CAPTCHA results:", error);
         showError("Failed to complete verification process");
@@ -384,7 +392,7 @@
           setTimeout(() => {
             window.location.href = result.redirectUrl + 
               (result.redirectUrl.includes('?') ? '&' : '?') + 
-              'token=' + encodeURIComponent(result.token);
+              'token=' + encodeURIComponent(securityToken);
           }, 1500);
         }
       }

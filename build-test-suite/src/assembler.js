@@ -210,7 +210,7 @@ function selectTests(seed, templates) {
     });
 
     const webglTests = selectMultipleFromCategory(templates, 'webglTests', {
-      include: ['webgl_basic']
+      include: ['webgl_fingerprinting']
     });
     
     const timingTests = selectMultipleFromCategory(templates, 'timingTests', {
