@@ -328,15 +328,6 @@ function generateTestParams(test, seed, suiteParams = {}) {
     }
   });
   
-  // Add additional entropy params that can be used for uniqueness
-  paramValues['PARAM_UNIQUE_ID'] = crypto.createHash('sha256')
-    .update(seed)
-    .digest('hex')
-    .substring(0, 16);
-  
-  // Add timestamp-based parameter (changes on each build but remains constant in a suite)
-  paramValues['PARAM_TIMESTAMP'] = Date.now();
-  
   return paramValues;
 }
 

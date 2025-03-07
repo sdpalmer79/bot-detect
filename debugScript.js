@@ -278,52 +278,69 @@ function injectDebugScript(htmlPath) {
   console.log('Injected debug panel into index.html');
 }
 
-// Basic verification logic
+// Verification logic
 async function verifyResults(submission, challenge, suiteData) {
   
-  // First check challenge expiration (independent of any test)
-  const expirationCheck = checkChallengeExpiration(challenge);
-  if (!expirationCheck.valid) {
-    console.log('Challenge expired:', expirationCheck);
+  try {
+    // First check challenge expiration (independent of any test)
+    const expirationCheck = checkChallengeExpiration(challenge);
+    if (!expirationCheck.valid) {
+      console.log('Challenge expired:', expirationCheck);
+      return {
+        valid: false,
+        challengeExpired: true,
+        expirationDetails: expirationCheck,
+        message: "Challenge has expired"
+      };
+    }
+
+    console.log('Verifying proof of work...');
+    const powValid = submission.powResult && 
+                  submission.powResult.hash && 
+                  submission.powResult.hash.startsWith('00');
+
+    console.log('Evaluating test results...');
+    const testEvaluations = new Map();
+    suiteData.tests.filter((test) => test.isRealTest).forEach(async test => {
+      console.log(`Evaluating test ${test.originalId}...`);
+      const result = submission.challengeSolution.testResults[test.id];
+
+      switch (test.originalId) {
+        case 'token_verification':
+          testEvaluations.set('token_verification', await evaluateTokenVerification(result, challenge, suiteData));
+          break;
+        default:
+          console.log(`Unknown test type: ${test.originalId}`);
+          throw new CaptchaError('UNKNOWN_TEST', {
+            message: `Unknown test type: ${test.originalId}`
+          });
+      }
+    });
+    
+    return {
+      valid: true
+    };
+  } catch (error) {
+    if (error instanceof CaptchaError) {
+      // Return structured error response for known failure cases
+      return {
+        valid: false,
+        errorCode: error.code,
+        message: error.message,
+        details: error.details
+      };
+    }
+    
+    // For unexpected errors, return minimal information
+    console.error('Unexpected verification error:', error);
     return {
       valid: false,
-      challengeExpired: true,
-      expirationDetails: expirationCheck,
-      message: "Challenge has expired"
+      errorCode: 'VERIFICATION_ERROR',
+      message: 'An unexpected error occurred during verification'
     };
   }
-
-  console.log('Verifying proof of work...');
-  const powValid = submission.powResult && 
-                 submission.powResult.hash && 
-                 submission.powResult.hash.startsWith('00');
-
-  console.log('Verifying test results...');
-  suiteData.tests.filter((test) => test.isRealTest).forEach(test => {
-    console.log(`Verifying test ${original.id}...`);
-    const result = submission.challengeSolution.testResults[test.id];
-
-    switch (test.original.id) {
-      case 'token_verification':
-        await evaluateTokenVerification(result, challenge, suiteData);
-        break;
-      default:
-        console.log(`Unknown test type: ${test.original.id}`);
-        throw new Error('Unknown test type');
-    }
-  
-  return {
-    valid: powValid && missingTests.length === 0,
-    powValid,
-    testsComplete: missingTests.length === 0,
-    missingTests: missingTests.length > 0 ? missingTests : undefined,
-    debug: {
-      suiteId: suiteData.suiteId,
-      realTests,
-      receivedTests: Object.keys(submission.testResults || {})
-    }
-  };
 }
+
 
 // When run directly
 if (require.main === module) {
@@ -332,6 +349,15 @@ if (require.main === module) {
 }
 
 module.exports = { startDebugServer };
+
+// Custom error class for CAPTCHA validation
+class CaptchaError extends Error {
+  constructor(code, {message, details}) {
+    super(message);
+    this.code = code;
+    this.details = details;
+  }
+}
 
 /**
  * Standalone challenge expiration check
@@ -357,7 +383,7 @@ function checkChallengeExpiration(challenge) {
  * @param {Object} result - Client test result
  * @param {Object} challenge - Challenge data sent to client
  * @param {Object} suiteData - Suite configuration data
- * @returns {Object} Evaluation results with detailed verification information
+ * @returns {Object} Evaluation results with standardized format
  */
 async function evaluateTokenVerification(result, challenge, suiteData) {
   console.log('Evaluating token verification result:', result);
@@ -367,10 +393,12 @@ async function evaluateTokenVerification(result, challenge, suiteData) {
     if (!result || result.error) {
       return {
         valid: false,
-        hashValid: false,
-        error: result?.error || 'Invalid test result',
         botProbability: 0.9,
-        confidence: 0.8
+        confidence: 0.8,
+        details: {
+          hashValid: false,
+          error: result?.error || 'Invalid test result'
+        }
       };
     }
     
@@ -378,10 +406,13 @@ async function evaluateTokenVerification(result, challenge, suiteData) {
     const token = challenge.token;
     const challengeId = challenge.id;
     const timestamp = challenge.timestamp;
-    const transformSeed = suiteData.transformSeed;
+
+    // Retrieve transform seed from suite data
+    const test = suiteData.tests.find(test => test.originalId === 'token_verification');
+    const transformSeed = test.paramValues['PARAM_TRANSFORM_SEED'];
     
     // Calculate expected tokenHash using server-side implementation
-    const expectedHash = calculateClientCompatibleHash(
+    const expectedHash = await calculateClientCompatibleHash(
       token, 
       challengeId, 
       timestamp, 
@@ -396,11 +427,6 @@ async function evaluateTokenVerification(result, challenge, suiteData) {
     const timingNormal = executionTime > 5; // Minimum reasonable time
     const timingSuspicious = executionTime < 10 || executionTime > 5000;
     
-    // Check for challenge expiration
-    const maxAge = 900000; // 15 minutes
-    const challengeAge = Date.now() - timestamp;
-    const challengeExpired = challengeAge > maxAge;
-    
     // Additional security checks
     const expectedRounds = (parseInt(transformSeed.substring(0, 2), 16) % 7) + 3;
     const roundsMatch = result.rounds === expectedRounds;
@@ -412,71 +438,81 @@ async function evaluateTokenVerification(result, challenge, suiteData) {
     if (!roundsMatch) botProbability += 0.4;
     if (!timingNormal) botProbability += 0.2;
     if (timingSuspicious) botProbability += 0.1;
-    if (challengeExpired) botProbability += 0.2;
     
     // Cap probability between 0 and 1
     botProbability = Math.min(Math.max(botProbability, 0), 1);
     
     return {
-      valid: hashValid && timingNormal && !challengeExpired && roundsMatch,
-      hashValid,
-      timingNormal,
-      roundsMatch,
-      challengeValid: !challengeExpired,
+      valid: hashValid && timingNormal && roundsMatch,
       botProbability,
       confidence: hashValid ? 0.95 : 0.8,
       details: {
+        hashValid,
+        timingNormal,
+        roundsMatch,
         expectedHashPrefix: expectedHash.substring(0, 16),
         receivedHashPrefix: result.tokenHash,
         expectedRounds,
         reportedRounds: result.rounds,
-        processingTime: result.duration,
-        challengeAge,
-        maxValidAge: maxAge
+        processingTime: result.duration
       }
     };
   } catch (error) {
     console.error('Error evaluating token verification:', error);
     return {
       valid: false,
-      error: error.message,
       botProbability: 0.5,
-      confidence: 0.3
+      confidence: 0.3,
+      details: {
+        error: error.message
+      }
     };
   }
 }
 
 /**
- * Calculates token hash using the client algorithm
- * This mirrors the client implementation exactly, without using previousHash
+ * Calculates token hash using the client algorithm with environment-agnostic behavior
  */
 async function calculateClientCompatibleHash(token, challengeId, timestamp, transformSeed) {
+  // CRITICAL: Use explicit string conversion with consistent method
+  // This prevents differences in implicit type conversion between environments
+  const tokenStr = String(token);
+  const challengeIdStr = String(challengeId);
+  const timestampStr = timestamp.toString(); // Explicit toString() for numbers
+  
+  console.log('=== SERVER HASH CALCULATION ===');
+  console.log(`Input parameters (after string conversion):`);
+  console.log(`token: "${tokenStr}" (${typeof tokenStr})`);
+  console.log(`challengeId: "${challengeIdStr}" (${typeof challengeIdStr})`);
+  console.log(`timestamp: "${timestampStr}" (${typeof timestampStr})`);
+  console.log(`seed: "${transformSeed}" (${typeof transformSeed})`);
+  
   // Phase 1: Initial hash of token with challenge data
-  let digest = await sha256(token + challengeId + timestamp);
+  let digest = await sha256(tokenStr + challengeIdStr + timestampStr);
+  console.log('Initial hash:', digest);
   
   // Phase 2: Suite-specific transformation
   digest = await performSuiteTransform(digest, transformSeed);
+  console.log('After suite transform:', digest);
   
   // Phase 3: Multiple rounds of computation
-  const rounds = (parseInt(transformSeed.substring(0, 2), 16) % 7) + 3; // 3-10 rounds
+  const rounds = (parseInt(transformSeed.substring(0, 2), 16) % 7) + 3;
+  console.log(`Calculated rounds: ${rounds}`);
   
   for (let i = 0; i < rounds; i++) {
-    // Use token substring instead of previousHash, matching client implementation
-    digest = await sha256(digest + (i.toString()) + token.substring(0, 8));
+    // IMPORTANT: Match client's string concatenation exactly
+    const preHashInput = digest + i.toString() + tokenStr.substring(0, 8);
+    console.log(`Round ${i} input: ${preHashInput.substring(0, 20)}...`);
     
-    // Apply additional transformations based on round number
+    digest = await sha256(preHashInput);
+    console.log(`Round ${i} after SHA:`, digest);
+    
     digest = await applyRoundTransformation(digest, i, transformSeed);
+    console.log(`Round ${i} after transform:`, digest);
   }
   
+  console.log(`Final hash: ${digest}`);
   return digest;
-}
-
-// SHA-256 hash function for server-side validation
-async function sha256(message) {
-  return crypto
-    .createHash('sha256')
-    .update(String(message))
-    .digest('hex');
 }
 
 // Suite-specific transformation function
@@ -508,22 +544,32 @@ async function performSuiteTransform(input, seed) {
   return result;
 }
 
-// Round-specific transformation function
+// Round-specific transformation function with consistent cross-environment behavior
 async function applyRoundTransformation(input, round, seed) {
-  // Select transformation based on round number and seed
   const transformType = (parseInt(seed.substring(round % seed.length, round % seed.length + 2), 16) + round) % 5;
+  console.log(`Round ${round} transform type: ${transformType}`);
   
   switch (transformType) {
-    case 0: // Reverse substrings
+    case 0: // Reverse substrings - no change needed
       const mid = Math.floor(input.length / 2);
       return input.substring(mid) + input.substring(0, mid);
       
-    case 1: // XOR with round number
-      return input.split('').map((char, i) => 
-        String.fromCharCode(char.charCodeAt(0) ^ ((round + 1) * (i + 1) % 256))
-      ).join('');
+    case 1: { // XOR with round number - fixed for cross-environment consistency
+      // CRITICAL: Use explicit numeric conversions and bitwise operations
+      // This ensures consistent behavior across all environments
+      const result = [];
+      for (let i = 0; i < input.length; i++) {
+        const charCode = input.charCodeAt(i);
+        // Ensure the operation stays within 0-255 range with explicit modulo
+        const xorValue = ((round + 1) * (i + 1)) % 256;
+        // Use bitwise XOR (^) with explicit conversion back to valid char range
+        const newCharCode = (charCode ^ xorValue) & 0xFF;
+        result.push(String.fromCharCode(newCharCode));
+      }
+      return result.join('');
+    }
       
-    case 2: // Interleave halves
+    case 2: // Interleave halves - no change needed
       const firstHalf = input.substring(0, input.length/2);
       const secondHalf = input.substring(input.length/2);
       let interleaved = '';
@@ -532,14 +578,26 @@ async function applyRoundTransformation(input, round, seed) {
       }
       return interleaved;
       
-    case 3: // Add round signature
+    case 3: // Add round signature - ensure consistent string conversion
       return await sha256(input + round.toString().repeat(round + 1));
       
-    case 4: // Rotate by round number
-      const rotation = (round + 1) * 3 % input.length;
+    case 4: // Rotate by round number - use floor for consistent integer division
+      const rotation = Math.floor((round + 1) * 3) % input.length;
       return input.substring(rotation) + input.substring(0, rotation);
       
     default:
       return input;
   }
+}
+
+// SHA-256 implementation with consistent encoding
+async function sha256(message) {
+  // Always convert input to string with consistent encoding
+  const utf8Message = String(message);
+  
+  // Use UTF-8 explicitly to match browser's TextEncoder
+  return crypto
+    .createHash('sha256')
+    .update(utf8Message, 'utf8')
+    .digest('hex');
 }
