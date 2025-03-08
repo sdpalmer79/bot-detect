@@ -17,7 +17,7 @@ async function startDebugServer(port = 3000) {
   
   // Get suite paths
   const suiteDir = testSuite.path;
-  const suiteJsPath = path.join(suiteDir, 'test-suite.src.js');
+  const suiteJsPath = path.join(suiteDir, 'test-suite.js');
   const suiteDataPath = path.join(suiteDir, 'suite-data.json');
   
   // Read suite data
@@ -303,6 +303,20 @@ async function verifyResults(submission, challenge, suiteData) {
     const testEvaluations = new Map();
     suiteData.tests.filter((test) => test.isRealTest).forEach(async test => {
       console.log(`Evaluating test ${test.originalId}...`);
+      
+      // Check if the test result exists
+      if (!submission.challengeSolution.testResults || 
+        !submission.challengeSolution.testResults.hasOwnProperty(test.id)) {
+        throw new CaptchaError('MISSING_TEST_RESULT', {
+          message: `Missing test result for test ${test.originalId} (ID: ${test.id})`,
+          details: {
+            testId: test.id,
+            originalTestId: test.originalId,
+            availableResults: Object.keys(submission.challengeSolution.testResults || {})
+          }
+        });
+      }
+
       const result = submission.challengeSolution.testResults[test.id];
 
       switch (test.originalId) {
@@ -325,6 +339,9 @@ async function verifyResults(submission, challenge, suiteData) {
     };
   } catch (error) {
     if (error instanceof CaptchaError) {
+      // Log error
+      console.error('Verification error:', error);
+      
       // Return structured error response for known failure cases
       return {
         valid: false,
@@ -343,7 +360,6 @@ async function verifyResults(submission, challenge, suiteData) {
     };
   }
 }
-
 
 // When run directly
 if (require.main === module) {

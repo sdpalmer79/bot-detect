@@ -41,37 +41,36 @@ async function obfuscateSuite(suiteInfo) {
 }
 
 function generateUniqueObfuscationOptions(suiteId) {
-  // Create pseudo-random but deterministic options based on suiteId
   const seed = parseInt(suiteId.replace(/[^0-9]/g, '').substring(0, 8), 10);
-  const random = new PseudoRandom(seed);
   
   return {
+    // Core settings - minimal impact
     compact: true,
-    controlFlowFlattening: true,
-    controlFlowFlatteningThreshold: 0.75 + (random.next() * 0.25), // Increased to 75-100%
-    deadCodeInjection: true,
-    deadCodeInjectionThreshold: 0.6 + (random.next() * 0.4), // Increased to 60-100%
-    debugProtection: true, // Always enable
-    debugProtectionInterval: Math.floor(1000 + random.next() * 3000),
-    disableConsoleOutput: true, // Disable console for production
-    domainLock: [], // Could add domain restrictions for additional security
-    identifierNamesGenerator: 'mangled', // Always use mangled for maximum confusion
-    identifiersPrefix: '', 
-    log: false,
-    renameGlobals: true, // Always rename globals
-    reservedNames: [], 
-    rotateStringArray: true,
+    controlFlowFlattening: false,
+    deadCodeInjection: false,
+    debugProtection: true,            // ENABLE: basic debugging prevention
+    debugProtectionInterval: 4000,    // Long interval = minimal performance impact
+    disableConsoleOutput: true,
+    
+    // Rename variables and transform strings
+    identifierNamesGenerator: 'hexadecimal',
+    renameGlobals: false,
+    
+    // Selective string array features
+    stringArray: true,                // ENABLE: basic string protection
+    stringArrayThreshold: 0.3,        // Only protect 30% of strings (most important ones)
+    rotateStringArray: true,          // ENABLE: rotate string order
+    shuffleStringArray: true,         // ENABLE: shuffle string order
+    stringArrayEncoding: [],          // Still no encoding (performance-heavy)
+    
+    // Other settings
+    selfDefending: false,
+    splitStrings: false,
+    transformObjectKeys: false,
+    unicodeEscapeSequence: true,
+    
     seed: seed,
-    selfDefending: true,
-    shuffleStringArray: true,
-    splitStrings: true,
-    splitStringsChunkLength: 3 + Math.floor(random.next() * 7), // Smaller chunks (3-10)
-    stringArray: true,
-    stringArrayEncoding: ['base64', 'rc4'], // Use both encodings
-    stringArrayThreshold: 0.9 + (random.next() * 0.1), // 90-100% of strings
-    target: 'browser', // Specify browser target
-    transformObjectKeys: true, // Always transform
-    unicodeEscapeSequence: true // Always enable
+    target: 'browser'
   };
 }
 

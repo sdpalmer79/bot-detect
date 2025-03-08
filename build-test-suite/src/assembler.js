@@ -7,48 +7,32 @@ const testTemplates = loadAllTestTemplates();
 
 // Loads all test templates from the templates directory
 function loadAllTestTemplates() {
-    try {
-      // Import test template modules
-      const {
-        tokenTests,
-        webglTests, 
-        timingTests, 
-        environmentTests, 
-        interactionTests,
-        networkTests,
-        inputBehaviorTests,
-        deviceIntegrityTests,
-        automationTests
-      } = require('./templates');
-  
-      // Return combined templates object
-      return {
-        tokenTests,
-        webglTests, 
-        timingTests, 
-        environmentTests, 
-        interactionTests,
-        networkTests,
-        inputBehaviorTests,
-        deviceIntegrityTests,
-        automationTests
-      };
-    } catch (error) {
-      console.error('Failed to load test templates:', error);
-      
-      // Return empty templates object as fallback
-      return {
-        webglTests: { variations: [] },
-        timingTests: { variations: [] },
-        environmentTests: { variations: [] },
-        interactionTests: { variations: [] },
-        networkTests: { variations: [] },
-        inputBehaviorTests: { variations: [] },
-        deviceIntegrityTests: { variations: [] },
-        automationTests: { variations: [] }
-      };
-    }
-  }
+  // Import test template modules
+  const {
+    tokenTests,
+    webglTests, 
+    timingTests, 
+    environmentTests, 
+    interactionTests,
+    networkTests,
+    inputBehaviorTests,
+    deviceIntegrityTests,
+    automationTests
+  } = require('./templates');
+
+  // Return combined templates object
+  return {
+    tokenTests,
+    webglTests, 
+    timingTests, 
+    environmentTests, 
+    interactionTests,
+    networkTests,
+    inputBehaviorTests,
+    deviceIntegrityTests,
+    automationTests
+  };
+}
 
 /**
  * Selects multiple tests from a category

@@ -156,6 +156,9 @@ const webglTests = {
           // Start timing
           const startTime = performance.now();
           
+          // Calculate uniqueSeed from challenge timestamp at runtime
+          const uniqueSeed = (ctx.challenge.timestamp % 10000) / 10000;
+          
           // Collect basic WebGL support information
           const result = {
             webglSupport: {
@@ -348,8 +351,8 @@ const webglTests = {
                 }
                 
                 void main() {
-                  // Use challenge data in the hash seed for uniqueness
-                  float uniqueSeed = ${(ctx.challenge.timestamp % 10000) / 10000};
+                  // Use pre-calculated uniqueSeed value
+                  float uniqueSeed = \${uniqueSeed};
                   
                   vec2 uv = texCoord;
                   float t = time * 0.001 + uniqueSeed;
