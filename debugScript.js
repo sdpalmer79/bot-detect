@@ -23,18 +23,6 @@ async function startDebugServer(port = 3000) {
   // Read suite data
   const suiteData = JSON.parse(fs.readFileSync(suiteDataPath, 'utf-8'));
   
-  // Generate a simple challenge - this would normally be done by the server per request and saved in a database
-  const challenge = {
-    id: `challenge-${Date.now()}`,
-    suiteId: testSuite.suiteId,
-    suiteUrl: `/suite/${testSuite.suiteId}`,
-    timestamp: Date.now(),
-    token: 'debug-token-12345',
-    powDifficulty: 2,  // Reduced for faster testing
-    powPrefix: 'debug',
-    expiry: Date.now() + 300000 // 5 minutes
-  };
-
   // Setup debug directory
   const debugDir = path.join(__dirname, 'debug');
   if (!fs.existsSync(debugDir)) {
@@ -87,7 +75,7 @@ async function startDebugServer(port = 3000) {
     console.log(JSON.stringify(req.body, null, 2));
     
     // For debug server, show detailed verification process
-    const verification = await verifyResults(req.body, challenge, suiteData);
+    const verification = await verifySubmission(req.body, challenge, suiteData);
     
     console.log('Verification result:', verification);
     res.json(verification);
@@ -277,3 +265,12 @@ function injectDebugScript(htmlPath) {
   fs.writeFileSync(htmlPath, html);
   console.log('Injected debug panel into index.html');
 }
+
+// When run directly
+if (require.main === module) {
+  const port = parseInt(process.argv[2] || '3000', 10);
+  startDebugServer(port).catch(console.error);
+}
+
+module.exports = { startDebugServer };
+
