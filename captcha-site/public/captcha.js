@@ -4,9 +4,6 @@
     const urlParams = new URLSearchParams(window.location.search);
     const securityToken = urlParams.get('token') || '';
     
-    // Store test results
-    let captchaChallenge = null;
-    
     // Generate a UUID for request correlation
     function generateUUID() {
       return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -177,11 +174,11 @@
       // Generate request ID to correlate this request with later submissions
       const requestId = generateUUID();
       
-      // Collect environment data
+      // Collect essential data for initial fingerprinting
       const envData = collectEnvironmentData();
-      
-      // Collect behavioral data
-      const behaviorData = collectBehavioralData();
+      const connectionData = getConnectionInfo();
+      const featuresData = detectFeatures();
+      const behaviorData = collectBehavioralData(false); // Basic behavioral data only
       
       const response = await fetch('/api/request-challenge', {
         method: 'POST',
@@ -198,61 +195,27 @@
           pageUrl: window.location.href,
           referrer: document.referrer,
           
-          // Environment data
+          // Core fingerprinting data
           environment: {
-            // Screen properties
-            screen: {
-              width: window.screen.width,
-              height: window.screen.height,
-              availWidth: window.screen.availWidth,
-              availHeight: window.screen.availHeight,
-              colorDepth: window.screen.colorDepth,
-              pixelDepth: window.screen.pixelDepth,
-              orientation: window.screen.orientation?.type
-            },
-            
-            // Window properties
-            window: {
-              innerWidth: window.innerWidth,
-              innerHeight: window.innerHeight,
-              outerWidth: window.outerWidth,
-              outerHeight: window.outerHeight,
-              devicePixelRatio: window.devicePixelRatio
-            },
-            
-            // Browser capabilities
-            browser: {
-              userAgent: navigator.userAgent,
-              platform: navigator.platform,
-              language: navigator.language,
-              languages: navigator.languages,
-              doNotTrack: navigator.doNotTrack,
-              cookieEnabled: navigator.cookieEnabled,
-              hardwareConcurrency: navigator.hardwareConcurrency || 0,
-              deviceMemory: navigator.deviceMemory || 0,
-              maxTouchPoints: navigator.maxTouchPoints || 0
-            },
-            
-            // Time & location info
+            ...envData,
+            // Add time zone info
             timeZone: {
               offset: new Date().getTimezoneOffset(),
               timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
             },
-            
-            // Connection information (if available)
-            connection: getConnectionInfo(),
-            
-            // Feature detection
-            features: detectFeatures()
+            // Add network and features data
+            connection: connectionData,
+            features: featuresData
           },
           
-          // Behavioral data
+          // Basic behavior data
           behavior: behaviorData
         })
       });
       
-      // Store the request ID for later correlation
+      // Store the request ID and initial environment for later comparison
       localStorage.setItem('captchaRequestId', requestId);
+      localStorage.setItem('initialEnvironment', JSON.stringify(envData));
       
       if (!response.ok) {
         throw new Error("Failed to get CAPTCHA challenge");
@@ -260,21 +223,6 @@
       
       return await response.json();
     }
-    
-    function loadCaptchaSuite(suiteUrl) {
-      updateStatus("Loading verification...");
-      
-      return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = suiteUrl + '?t=' + Date.now() + '&token=' + encodeURIComponent(securityToken);
-        script.onload = resolve;
-        script.onerror = () => {
-          reject(new Error("Failed to load verification suite"));
-        };
-        document.head.appendChild(script);
-      });
-    }
-    
     
     // Submit all test results back to server for verification
     async function submitCaptchaResults(verificationResults, challenge) {
@@ -312,8 +260,23 @@
               powResult: verificationResults.powResult
             },
             
-            // Current environment data for comparison
-            currentEnvironment: currentEnvData,
+            // Standardized field name (was "currentEnvironment")
+            environment: {
+              // Environment data
+              ...currentEnvData,
+              
+              // Time & location info
+              timeZone: {
+                offset: new Date().getTimezoneOffset(),
+                timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+              },
+              
+              // Connection information (if available)
+              connection: getConnectionInfo(),
+              
+              // Feature detection
+              features: detectFeatures()
+            },
             
             // Behavioral data
             behavior: fullBehaviorData,
@@ -327,12 +290,104 @@
           })
         });
 
-        const verfication = await response.json();
-        return verfication;
+        const verification = await response.json();
+        return verification;
 
       } catch (error) {
         console.error("Error submitting CAPTCHA results:", error);
         showError("Failed to complete verification process");
+        return { valid: false, error: error.message };
+      }
+    }
+
+    // Load the CAPTCHA suite script
+    function loadCaptchaSuite(suiteUrl) {
+      updateStatus("Loading verification...");
+      
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = suiteUrl + '?t=' + Date.now() + '&token=' + encodeURIComponent(securityToken);
+        script.onload = resolve;
+        script.onerror = () => {
+          reject(new Error("Failed to load verification suite"));
+        };
+        document.head.appendChild(script);
+      });
+    }
+    
+    // Submit all test results back to server for verification
+    async function submitCaptchaResults(verificationResults, challenge) {
+      updateStatus("Completing verification...");
+      
+      // Get the stored request ID 
+      const requestId = localStorage.getItem('captchaRequestId');
+      
+      // Collect current environment data
+      const currentEnvData = collectEnvironmentData();
+      
+      // Collect full behavioral data
+      const fullBehaviorData = collectBehavioralData(true);
+      
+      try {
+        const response = await fetch('/api/verify-captcha', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Security-Token': securityToken,
+            'X-Request-ID': requestId
+          },
+          body: JSON.stringify({
+            // Challenge identification
+            challengeId: challenge.id,
+            initialRequestId: requestId,
+            timestamp: Date.now(),
+            token: securityToken,
+            
+            // Results from tests
+            challengeSolution: {
+              testResults: verificationResults.testResults,
+              finalChainHash: verificationResults.finalChainHash,
+              completionTime: verificationResults.completionTime,
+              powResult: verificationResults.powResult
+            },
+            
+            // Standardized field name (was "currentEnvironment")
+            environment: {
+              // Environment data
+              ...currentEnvData,
+              
+              // Time & location info
+              timeZone: {
+                offset: new Date().getTimezoneOffset(),
+                timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+              },
+              
+              // Connection information (if available)
+              connection: getConnectionInfo(),
+              
+              // Feature detection
+              features: detectFeatures()
+            },
+            
+            // Behavioral data
+            behavior: fullBehaviorData,
+            
+            // Performance data
+            performance: {
+              navigationTiming: getNavigationTiming(),
+              resourceTiming: getResourceTiming(),
+              memoryInfo: getMemoryInfo()
+            }
+          })
+        });
+
+        const verification = await response.json();
+        return verification;
+
+      } catch (error) {
+        console.error("Error submitting CAPTCHA results:", error);
+        showError("Failed to complete verification process");
+        return { valid: false, error: error.message };
       }
     }
     
