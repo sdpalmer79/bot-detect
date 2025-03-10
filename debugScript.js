@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { buildSuites } = require('./build-test-suite/src/build');
-const { verifySubmission } = require('./verifyUtils');
+const { createChallengeForRequest, verifySubmission } = require('./challengeUtils');
 
 // Create debug server
 async function startDebugServer(port = 3000) {
@@ -22,7 +22,8 @@ async function startDebugServer(port = 3000) {
   
   // Read suite data
   const suiteData = JSON.parse(fs.readFileSync(suiteDataPath, 'utf-8'));
-  
+  const challenge = createChallengeForRequest(suiteData)
+
   // Setup debug directory
   const debugDir = path.join(__dirname, 'debug');
   if (!fs.existsSync(debugDir)) {

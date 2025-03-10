@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
+const  { evaluateTokenVerification, evaluateWebglFingerprinting } = require('./verifyUtils');
 
 const MAX_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_CHALLENGE_AGE, 5 * 60 * 1000);
 const CHALLENGE_POW_DIFFICULTY = parseEnvNumber(process.env.MAX_CHALLENGE_AGE, 2);
@@ -16,25 +17,30 @@ function assignTestSuite() {
     
 }
 
-function createChallengeForRequest(testSuite, request) {
-  
-    //TO-DO create challenge id when saving to db
-    const challenge = {
-      suiteId: testSuite.suiteId,
-      timestamp: Date.now(),
-      token: getToken(),
-      powDifficulty: CHALLENGE_POW_DIFFICULTY,
-      powPrefix: `${challengeId.substring(0, 8)}-${testSuite.suiteId.substring(0, 8)}`,
-      expiry: Date.now() + MAX_CHALLENGE_AGE // 5 minutes
-    };
-  }
+function createChallengeForRequest(suiteData, request) {
+  //TO-DO create challenge id when saving to db
+  const challengeId = uuidv4();  
+  const challenge = {
+    challengeId,
+    suiteId: suiteData.suiteId,
+    suiteUrl: `/suite/${suiteData.suiteId}`,
+    timestamp: Date.now(),
+    token: getToken(),
+    powDifficulty: CHALLENGE_POW_DIFFICULTY,
+    powPrefix: `${challengeId.substring(0, 8)}-${suiteData.suiteId.substring(0, 8)}`,
+    expiry: Date.now() + MAX_CHALLENGE_AGE // 5 minutes
+  };
+
+  return challenge;
+}
   
 function getRequestFingerprint(request) {
 
 }
 
 function getToken(){
-
+  //TO-DO create token
+  return 'token-1234';
 }
 
 /**
@@ -147,3 +153,5 @@ async function verifySubmission(submission, challenge, suiteData) {
       remainingTime: Math.max(0, (challenge.timestamp + maxAge) - Date.now())
     };
   }
+
+  module.exports = { createChallengeForRequest, verifySubmission };
