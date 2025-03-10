@@ -18,10 +18,18 @@ function loadAllTestTemplates() {
     inputBehaviorTests,
     deviceIntegrityTests,
     automationTests
-  } = require('./templates');
+  } = require('./autoTemplates');
+  
+  // Import interactive visual challenge templates
+  const {
+    patternCompletionTests,
+    imageSelectionTests,
+    objectOrientationTests
+  } = require('./interactiveTemplates');
 
   // Return combined templates object
   return {
+    // Automatic tests
     tokenTests,
     webglTests, 
     timingTests, 
@@ -30,7 +38,12 @@ function loadAllTestTemplates() {
     networkTests,
     inputBehaviorTests,
     deviceIntegrityTests,
-    automationTests
+    automationTests,
+    
+    // Interactive tests
+    patternCompletionTests,
+    imageSelectionTests,
+    objectOrientationTests
   };
 }
 
@@ -230,6 +243,92 @@ function selectTests(seed, templates) {
 }
   
 /**
+ * Selects interactive tests of various difficulty levels for the suite
+ * Each suite includes multiple interactive tests, but only one will be used at runtime
+ * based on the automatic test results and bot probability assessment
+ * 
+ * @param {string} seed - Seed for deterministic selection
+ * @param {Object} templates - All test templates
+ * @return {Array<Object>} - Selected interactive tests marked with isInteractive: true
+ */
+function selectInteractiveTests(seed, templates) {
+  // Get interactive test categories
+  const interactiveCategories = [
+    'patternCompletionTests',
+    'imageSelectionTests',
+    'objectOrientationTests'
+  ];
+  
+  // Create a deterministic random number generator
+  const seedInt = parseInt(seed.substring(0, 8), 16);
+  const rng = new PseudoRandom(seedInt);
+  
+  // Select at least one test from each difficulty level (easy, medium, hard)
+  const difficulties = {
+    easy: { min: 1, max: 3 },    // Difficulty levels 1-3
+    medium: { min: 4, max: 6 },  // Difficulty levels 4-6
+    hard: { min: 7, max: 10 }    // Difficulty levels 7-10
+  };
+  
+  const selectedTests = [];
+  
+  // For each difficulty level, select one test
+  Object.entries(difficulties).forEach(([level, range]) => {
+    // Collect all tests within this difficulty range
+    const testsInRange = [];
+    
+    interactiveCategories.forEach(category => {
+      if (templates[category]?.variations) {
+        const matchingTests = templates[category].variations.filter(
+          test => test.difficultyLevel >= range.min && test.difficultyLevel <= range.max
+        );
+        testsInRange.push(...matchingTests);
+      }
+    });
+    
+    // If we have tests in this range, select one randomly
+    if (testsInRange.length > 0) {
+      const selectedIndex = Math.floor(rng.next() * testsInRange.length);
+      const selectedTest = testsInRange[selectedIndex];
+      
+      // Mark test as interactive
+      selectedTests.push({
+        ...selectedTest,
+        isInteractive: true,
+        difficultyLevel: selectedTest.difficultyLevel || range.min,
+        isRealTest: false // Interactive tests don't run in the automatic test chain
+      });
+    }
+  });
+  
+  // Ensure we have at least one interactive test even if categories are empty
+  if (selectedTests.length === 0) {
+    // Fallback test (simplified pattern completion)
+    selectedTests.push({
+      id: "fallback_pattern_completion",
+      description: "Fallback pattern completion challenge",
+      difficultyLevel: 5,
+      isInteractive: true,
+      isRealTest: false,
+      code: `async function TEST_FUNCTION_NAME(ctx) {
+        try {
+          return {
+            challengeType: "pattern_completion",
+            success: false,
+            error: "Fallback interactive test - not implemented"
+          };
+        } catch (error) {
+          return { error: "Fallback test failed", errorMessage: error.message };
+        }
+      }`,
+      paramRanges: {}
+    });
+  }
+  
+  return selectedTests;
+}
+
+/**
  * Shuffles the order of tests in a deterministic way based on seed
  * Places tests in completely random order with no dependencies
  * 
@@ -413,7 +512,7 @@ async function runChainedTests(testContext) {
 }`;
 }
 
-function assembleSuiteCode(chainedTests, suiteSeed) {
+function assembleSuiteCode(chainedTests, suiteSeed, interactiveTests) {
   // Begin with core imports and initialization code
   let suiteCode = `
 // Automatically generated CAPTCHA suite
@@ -423,6 +522,25 @@ function assembleSuiteCode(chainedTests, suiteSeed) {
 // Test implementation
 const testImplementations = {
 ${generateTestFunctions(chainedTests)}
+};
+
+// Interactive test implementations (activated only when needed)
+const interactiveTestImplementations = {
+${interactiveTests.map(test => {
+  // Replace parameter placeholders with actual values
+  let code = test.code;
+  const paramValues = generateTestParams(test, suiteSeed + '_interactive_' + test.id);
+  Object.entries(paramValues).forEach(([key, value]) => {
+    code = code.replace(new RegExp(key, 'g'), JSON.stringify(value));
+  });
+  
+  // Replace function name placeholder
+  const functionName = `interactive_${test.id}`;
+  code = code.replace('TEST_FUNCTION_NAME', functionName);
+  
+  // Add function to the interactive test implementations object
+  return `  "${test.id}": ${code}`;
+}).join(',\n\n')}
 };
 
 // Proof of Work implementation
@@ -632,6 +750,61 @@ async function sha256(message) {
 // Test runner that enforces chaining
 ${generateChainedTestRunner(chainedTests)}
 
+// Interactive challenge activator
+async function activateInteractiveChallenge(type, params) {
+  try {
+    // Find an appropriate test based on difficulty level
+    let testId = null;
+    let targetDifficulty = params.difficulty || 5;
+    
+    // Select the closest matching test by difficulty
+    let minDiffDelta = Infinity;
+    for (const id in interactiveTestImplementations) {
+      // Extract difficulty from test ID
+      let testDifficulty = 5; // Default medium difficulty
+      
+      if (id.includes('easy')) {
+        testDifficulty = 2;
+      } else if (id.includes('medium')) {
+        testDifficulty = 5;
+      } else if (id.includes('hard')) {
+        testDifficulty = 8;
+      }
+      
+      const diffDelta = Math.abs(testDifficulty - targetDifficulty);
+      if (diffDelta < minDiffDelta) {
+        minDiffDelta = diffDelta;
+        testId = id;
+      }
+    }
+    
+    // If no appropriate test found, use first available
+    if (!testId && Object.keys(interactiveTestImplementations).length > 0) {
+      testId = Object.keys(interactiveTestImplementations)[0];
+    }
+    
+    // If still no test, return error
+    if (!testId) {
+      throw new Error("No interactive tests available");
+    }
+    
+    // Create a context object for the interactive test
+    const interactiveContext = {
+      challenge: params,
+      startTime: performance.now()
+    };
+    
+    // Run the selected interactive test
+    return await interactiveTestImplementations[testId](interactiveContext);
+  } catch (error) {
+    console.error("Error activating interactive challenge:", error);
+    return {
+      error: "Failed to activate interactive challenge",
+      errorMessage: error.message
+    };
+  }
+}
+
 // Initialize CaptchaSystem with integrated proof of work
 window.CaptchaSystem = {
   verify: async function(challenge) {
@@ -677,6 +850,22 @@ window.CaptchaSystem = {
         error: error.message || "Unknown error during verification"
       };
     }
+  },
+  
+  // Method to activate interactive challenge when needed
+  runInteractiveChallenge: async function(params) {
+    console.log("Starting interactive challenge");
+    
+    try {
+      const type = params.type || params.challengeType || "pattern_completion";
+      return await activateInteractiveChallenge(type, params);
+    } catch (error) {
+      console.error("Interactive challenge failed:", error);
+      return {
+        success: false,
+        error: error.message || "Unknown interactive challenge error"
+      };
+    }
   }
 };
 `;
@@ -688,41 +877,58 @@ function generateUniqueSuite(suiteId, baseSuiteDir) {
     // Generate a unique seed for this suite
     const suiteSeed = crypto.randomBytes(16).toString('hex');
     
-    // 1. Select tests to include (mix of core and dummy tests)
+    // 1. Select automatic tests
     const selectedTests = selectTests(suiteSeed, testTemplates);
     
-    // 2. Generate unique test order
+    // 2. Select interactive tests of various difficulty levels
+    const selectedInteractiveTests = selectInteractiveTests(suiteSeed, testTemplates);
+    
+    // 3. Generate unique test order for automatic tests
     const testOrder = shuffleTests(selectedTests, suiteSeed);
     
-    // 3. Create test chain linkages
+    // 4. Create test chain linkages for automatic tests
     const chainedTests = createTestChain(testOrder, suiteSeed);
     
-    // 4. Assemble the suite code
-    const suiteCode = assembleSuiteCode(chainedTests, suiteSeed);
+    // 5. Assemble the suite code with both automatic and interactive tests
+    const suiteCode = assembleSuiteCode(chainedTests, suiteSeed, selectedInteractiveTests);
     
-    // 5. Create the suite directory
+    // 6. Create the suite directory
     const suiteDir = path.join(baseSuiteDir, `${suiteId}`);
     fs.mkdirSync(suiteDir, { recursive: true });
     
-    // 6. Create original source version (for debugging)
+    // 7. Create original source version (for debugging)
     fs.writeFileSync(path.join(suiteDir, 'test-suite.src.js'), suiteCode);
     
-    // 7. Create the suite data
+    // 8. Create the suite data
     const suiteData = {
       // Suite identity
       suiteId: suiteId,
       created: new Date().toISOString(),
       suiteSeed: suiteSeed,
       
-      // Complete test information in a single array
-      tests: chainedTests.map(test => ({
-        id: test.id,                   // Random ID (test_a8f3b9c2)
-        originalId: test.originalId,   // Template ID (webgl_basic)
-        functionName: test.functionName, // Function name in suite
-        isRealTest: test.isRealTest,  // Real or dummy test
-        dependsOn: test.dependsOn,    // Previous test ID for chaining
-        paramValues: test.paramValues // Parameter values for this test
-      })),
+      // Complete test information
+      tests: [
+        // Automatic tests with chaining
+        ...chainedTests.map(test => ({
+          id: test.id,
+          originalId: test.originalId,
+          functionName: test.functionName,
+          isRealTest: test.isRealTest,
+          dependsOn: test.dependsOn,
+          paramValues: test.paramValues,
+          isInteractive: false
+        })),
+        
+        // Interactive tests (not part of automatic chain)
+        ...selectedInteractiveTests.map(test => ({
+          id: test.id,
+          originalId: test.id,
+          functionName: `interactive_${test.id}`,
+          isInteractive: true,
+          difficultyLevel: test.difficultyLevel,
+          paramValues: generateTestParams(test, suiteSeed + '_interactive_' + test.id)
+        }))
+      ],
     };
 
     // Write suite data to file

@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { buildSuites } = require('./build-test-suite/src/build');
-const { createChallengeForRequest, verifySubmission } = require('./challengeUtils');
+const { createChallengeForRequest, verifySubmission, createInteractiveChallenge } = require('./challengeUtils');
 
 // Create debug server
 async function startDebugServer(port = 3000) {
@@ -22,12 +22,18 @@ async function startDebugServer(port = 3000) {
   
   // Read suite data
   const suiteData = JSON.parse(fs.readFileSync(suiteDataPath, 'utf-8'));
-  const challenge = createChallengeForRequest(suiteData)
-
+  const challenge = createChallengeForRequest(suiteData);
+  
   // Setup debug directory
   const debugDir = path.join(__dirname, 'debug');
   if (!fs.existsSync(debugDir)) {
     fs.mkdirSync(debugDir, { recursive: true });
+  }
+  
+  // Create captcha-modules directory for interactive challenges
+  const modulesDir = path.join(debugDir, 'captcha-modules');
+  if (!fs.existsSync(modulesDir)) {
+    fs.mkdirSync(modulesDir, { recursive: true });
   }
   
   // Copy frontend files to debug directory
@@ -79,7 +85,53 @@ async function startDebugServer(port = 3000) {
     const verification = await verifySubmission(req.body, challenge, suiteData);
     
     console.log('Verification result:', verification);
+    
+    // If interactive verification is required, generate pattern completion challenge
+    if (verification.requiresInteractiveChallenge) {
+      console.log('Interactive challenge required, generating challenge');
+      
+      // Create client-side pattern completion module
+      createDebugPatternCompletionModule(modulesDir);
+    }
+    
     res.json(verification);
+  });
+  
+  // API endpoint to verify interactive captcha results
+  app.post('/api/verify-interactive-captcha', async (req, res) => {
+    console.log('Interactive verification received:');
+    console.log(JSON.stringify(req.body, null, 2));
+    
+    // Get both automatic and interactive challenge results
+    const { challengeSolution, interactiveChallenge } = req.body;
+    
+    // First verify the automatic tests
+    const autoVerification = await verifySubmission(req.body, challenge, suiteData);
+    
+    // Update verification with interactive challenge results
+    if (interactiveChallenge) {
+      // In a real implementation, this would analyze the interaction patterns
+      // For debug, simply check if the challenge was successful
+      const interactiveSuccess = interactiveChallenge.success === true;
+      
+      // Override verification result based on interactive challenge
+      autoVerification.valid = interactiveSuccess;
+      autoVerification.requiresInteractiveChallenge = false;
+      autoVerification.interactiveVerified = true;
+      
+      // Add interactive challenge details
+      autoVerification.details = autoVerification.details || {};
+      autoVerification.details.interactiveChallenge = {
+        success: interactiveSuccess,
+        type: interactiveChallenge.challengeType || 'pattern_completion',
+        completionTime: interactiveChallenge.completionTime,
+        interactionCount: (interactiveChallenge.userInteractions || []).length
+      };
+    }
+    
+    console.log('Interactive verification result:', autoVerification);
+    
+    res.json(autoVerification);
   });
   
   // Start server
@@ -88,6 +140,260 @@ async function startDebugServer(port = 3000) {
     console.log(`Test suite ID: ${testSuite.suiteId}`);
     console.log(`Debug frontend available at http://localhost:${port}/index.html`);
   });
+}
+
+// Create debug pattern completion module
+function createDebugPatternCompletionModule(modulesDir) {
+  const moduleCode = `// Pattern Completion Challenge module
+// This is a debugging implementation for the pattern completion challenge
+
+// Initialize global object for interactive challenges
+window.InteractiveCaptcha = window.InteractiveCaptcha || {};
+
+// Implementation for pattern completion challenge
+window.InteractiveCaptcha.pattern_completion = async function(container, parameters) {
+  console.log('Starting pattern completion challenge with parameters:', parameters);
+  
+  // Generate a deterministic challenge based on parameters
+  const difficulty = parameters.difficulty || 5;
+  const challengeId = parameters.challenge?.id || Math.random().toString(36).substring(7);
+  const timestamp = parameters.challenge?.timestamp || Date.now();
+  
+  // Record start time for interaction measurement
+  const startTime = performance.now();
+  
+  // Track user interactions
+  const userInteractions = [];
+  function recordInteraction(type, data) {
+    userInteractions.push({
+      type: type,
+      timestamp: performance.now(),
+      data: data
+    });
+  }
+  
+  // Add mousemove listener to container
+  container.addEventListener('mousemove', (e) => {
+    const rect = container.getBoundingClientRect();
+    recordInteraction('mousemove', {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+  });
+  
+  // Create title and instructions
+  const titleElement = document.createElement('h3');
+  titleElement.textContent = 'Visual Challenge';
+  titleElement.style.textAlign = 'center';
+  titleElement.style.marginBottom = '10px';
+  container.appendChild(titleElement);
+  
+  const instructions = document.createElement('p');
+  instructions.textContent = 'Select the pattern piece that completes the image';
+  instructions.style.textAlign = 'center';
+  instructions.style.marginBottom = '15px';
+  container.appendChild(instructions);
+  
+  // Create main image container
+  const imageContainer = document.createElement('div');
+  imageContainer.style.width = '250px';
+  imageContainer.style.height = '150px';
+  imageContainer.style.backgroundColor = '#f0f0f0';
+  imageContainer.style.margin = '0 auto';
+  imageContainer.style.position = 'relative';
+  imageContainer.style.border = '1px solid #ccc';
+  
+  // Create "missing" section
+  const missingSection = document.createElement('div');
+  missingSection.style.position = 'absolute';
+  missingSection.style.width = '50px';
+  missingSection.style.height = '50px';
+  missingSection.style.backgroundColor = 'white';
+  missingSection.style.border = '1px dashed #999';
+  
+  // Position missing section based on difficulty
+  const missingLeft = 100 + (difficulty * 5) % 100;
+  const missingTop = 50 + (difficulty * 3) % 50;
+  missingSection.style.left = missingLeft + 'px';
+  missingSection.style.top = missingTop + 'px';
+  
+  // Add pattern to main image
+  for (let i = 0; i < 8; i++) {
+    const pattern = document.createElement('div');
+    pattern.style.position = 'absolute';
+    pattern.style.width = '30px';
+    pattern.style.height = '30px';
+    pattern.style.borderRadius = '50%';
+    pattern.style.backgroundColor = getPatternColor(i, difficulty);
+    pattern.style.left = (i * 30) % 220 + 'px';
+    pattern.style.top = (i * 25) % 120 + 'px';
+    pattern.style.opacity = '0.7';
+    
+    // Don't add patterns that overlap with missing section
+    const patternLeft = (i * 30) % 220;
+    const patternTop = (i * 25) % 120;
+    if (!(patternLeft + 30 > missingLeft && patternLeft < missingLeft + 50 &&
+          patternTop + 30 > missingTop && patternTop < missingTop + 50)) {
+      imageContainer.appendChild(pattern);
+    }
+  }
+  
+  imageContainer.appendChild(missingSection);
+  container.appendChild(imageContainer);
+  
+  // Create options container
+  const optionsContainer = document.createElement('div');
+  optionsContainer.style.display = 'flex';
+  optionsContainer.style.justifyContent = 'space-around';
+  optionsContainer.style.marginTop = '20px';
+  container.appendChild(optionsContainer);
+  
+  // Generate options (one correct, others incorrect)
+  const optionCount = 3 + Math.min(Math.floor(difficulty / 3), 3); // 3-6 options based on difficulty
+  const correctOptionIndex = Math.floor(Math.random() * optionCount);
+  
+  // Create option elements
+  const optionElements = [];
+  for (let i = 0; i < optionCount; i++) {
+    const option = document.createElement('div');
+    option.style.width = '60px';
+    option.style.height = '60px';
+    option.style.backgroundColor = '#f0f0f0';
+    option.style.border = '2px solid #ccc';
+    option.style.borderRadius = '5px';
+    option.style.cursor = 'pointer';
+    option.style.position = 'relative';
+    
+    // The correct option has patterns matching the main image
+    if (i === correctOptionIndex) {
+      // Add matching patterns
+      for (let j = 0; j < 3; j++) {
+        const pattern = document.createElement('div');
+        pattern.style.position = 'absolute';
+        pattern.style.width = '20px';
+        pattern.style.height = '20px';
+        pattern.style.borderRadius = '50%';
+        pattern.style.backgroundColor = getPatternColor(j + 3, difficulty);
+        pattern.style.left = (j * 15) % 40 + 'px';
+        pattern.style.top = (j * 15) % 40 + 'px';
+        pattern.style.opacity = '0.7';
+        option.appendChild(pattern);
+      }
+    } else {
+      // Incorrect options have different patterns
+      for (let j = 0; j < 3; j++) {
+        const pattern = document.createElement('div');
+        pattern.style.position = 'absolute';
+        pattern.style.width = '15px';
+        pattern.style.height = '15px';
+        
+        // Make incorrect options different shapes or colors
+        if ((i + j) % 3 === 0) {
+          pattern.style.borderRadius = '0'; // Square shape
+        } else {
+          pattern.style.borderRadius = '50%'; // Circle shape
+        }
+        
+        pattern.style.backgroundColor = getPatternColor(i + j + 10, difficulty);
+        pattern.style.left = (j * 20) % 40 + 'px';
+        pattern.style.top = (j * 20) % 40 + 'px';
+        pattern.style.opacity = '0.7';
+        option.appendChild(pattern);
+      }
+    }
+    
+    optionsContainer.appendChild(option);
+    optionElements.push(option);
+    
+    // Add click event
+    option.addEventListener('click', () => {
+      recordInteraction('selection', {
+        optionIndex: i,
+        isCorrect: i === correctOptionIndex
+      });
+      
+      // Highlight selected option
+      optionElements.forEach((el, idx) => {
+        el.style.border = idx === i ? '2px solid #4CAF50' : '2px solid #ccc';
+      });
+      
+      // Show result message
+      const resultMessage = document.createElement('div');
+      resultMessage.style.textAlign = 'center';
+      resultMessage.style.padding = '10px';
+      resultMessage.style.marginTop = '15px';
+      resultMessage.style.fontWeight = 'bold';
+      
+      if (i === correctOptionIndex) {
+        resultMessage.textContent = 'Correct!';
+        resultMessage.style.color = '#4CAF50';
+      } else {
+        resultMessage.textContent = 'Incorrect. Please try again.';
+        resultMessage.style.color = '#F44336';
+        
+        // Allow another selection after delay
+        setTimeout(() => {
+          resultMessage.remove();
+          optionElements.forEach(el => {
+            el.style.border = '2px solid #ccc';
+          });
+        }, 1500);
+        return;
+      }
+      
+      container.appendChild(resultMessage);
+      
+      // Calculate completion time
+      const completionTime = performance.now() - startTime;
+      
+      // After a short delay, return the result
+      setTimeout(() => {
+        const result = {
+          success: i === correctOptionIndex,
+          challengeType: 'pattern_completion',
+          difficulty: difficulty,
+          completionTime: completionTime,
+          userInteractions: userInteractions,
+          data: {
+            selectedOptionIndex: i,
+            correctOptionIndex: correctOptionIndex
+          }
+        };
+        
+        // Resolve with the result
+        window.captchaInteractiveResult = result;
+        
+        // Dispatch event to notify that the challenge is complete
+        const event = new CustomEvent('captchaInteractiveComplete', { detail: result });
+        window.dispatchEvent(event);
+      }, 1000);
+    });
+  }
+  
+  // Return a promise that resolves when user completes the challenge
+  return new Promise((resolve) => {
+    window.addEventListener('captchaInteractiveComplete', (e) => {
+      resolve(e.detail);
+    }, { once: true });
+  });
+};
+
+// Helper function to generate pattern colors
+function getPatternColor(index, difficulty) {
+  const colors = [
+    '#3498db', '#2ecc71', '#e74c3c', '#f39c12', 
+    '#9b59b6', '#1abc9c', '#d35400', '#34495e'
+  ];
+  
+  // Deterministic color selection based on index and difficulty
+  const colorIndex = (index + difficulty) % colors.length;
+  return colors[colorIndex];
+}
+`;
+
+  // Write the module to the filesystem
+  fs.writeFileSync(path.join(modulesDir, 'pattern_completion.js'), moduleCode);
+  console.log('Created debug pattern completion module');
 }
 
 // Copy frontend files to debug directory

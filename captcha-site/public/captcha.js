@@ -155,10 +155,30 @@
           const verificationResults = await window.CaptchaSystem.verify(challenge);
           
           // Submit results
-          const verfication = await submitCaptchaResults(verificationResults, challenge);
-          // Handle successful verification
-          if (verfication.valid) {
-            showSuccess(verfication);
+          const verification = await submitCaptchaResults(verificationResults, challenge);
+          
+          // Check if interactive challenge is required
+          if (verification.requiresInteractiveChallenge && verification.interactiveChallenge) {
+            // Handle interactive challenge
+            updateStatus("Additional verification required...");
+            const interactiveResult = await handleInteractiveChallenge(verification.interactiveChallenge);
+            
+            // Submit interactive challenge results
+            const finalVerification = await submitInteractiveCaptchaResults(
+              verificationResults,
+              interactiveResult,
+              challenge
+            );
+            
+            // Handle final verification result
+            if (finalVerification.valid) {
+              showSuccess(finalVerification);
+            } else {
+              showError("Verification failed after interactive challenge");
+            }
+          } else if (verification.valid) {
+            // Handle successful verification (no interactive challenge needed)
+            showSuccess(verification);
           } else {
             showError("Verification failed");
           }
@@ -300,6 +320,152 @@
       }
     }
 
+    // Handle interactive challenge display and interaction
+    async function handleInteractiveChallenge(interactiveChallenge) {
+      return new Promise(async (resolve, reject) => {
+        try {
+          updateStatus("Loading visual challenge...");
+          
+          // Get the challenge type
+          const challengeType = interactiveChallenge.type || interactiveChallenge.parameters.challengeType;
+          
+          // Load the interactive challenge module
+          await loadInteractiveChallengeModule(challengeType);
+          
+          // Check if the challenge module was loaded correctly
+          if (!window.InteractiveCaptcha || !window.InteractiveCaptcha[challengeType]) {
+            throw new Error("Failed to load interactive challenge module");
+          }
+          
+          updateStatus("Please complete the visual challenge");
+          
+          // Get the container for the interactive challenge
+          const container = document.getElementById('captcha-graphic');
+          if (!container) {
+            throw new Error("Challenge container not found");
+          }
+          
+          // Make the container visible
+          container.style.display = 'block';
+          
+          // Clear any previous content
+          container.innerHTML = '';
+          
+          // Start the interactive challenge
+          const result = await window.InteractiveCaptcha[challengeType](
+            container, 
+            interactiveChallenge.parameters
+          );
+          
+          // Once the challenge is complete, resolve with the result
+          resolve(result);
+          
+        } catch (error) {
+          console.error("Interactive challenge error:", error);
+          updateStatus("Error loading interactive challenge");
+          reject(error);
+        }
+      });
+    }
+    
+    // Load the appropriate interactive challenge module
+    function loadInteractiveChallengeModule(challengeType) {
+      return new Promise((resolve, reject) => {
+        // Check if module is already loaded
+        if (window.InteractiveCaptcha && window.InteractiveCaptcha[challengeType]) {
+          resolve();
+          return;
+        }
+        
+        // Create a script element to load the module
+        const script = document.createElement('script');
+        script.src = `/captcha-modules/${challengeType}.js?t=${Date.now()}`;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error(`Failed to load ${challengeType} module`));
+        
+        // Add the script to the document
+        document.head.appendChild(script);
+      });
+    }
+    
+    // Submit interactive challenge results
+    async function submitInteractiveCaptchaResults(verificationResults, interactiveResult, challenge) {
+      updateStatus("Submitting verification...");
+      
+      // Get the stored request ID 
+      const requestId = localStorage.getItem('captchaRequestId');
+      
+      // Collect current environment data
+      const currentEnvData = collectEnvironmentData();
+      
+      // Collect full behavioral data
+      const fullBehaviorData = collectBehavioralData(true);
+      
+      try {
+        const response = await fetch('/api/verify-interactive-captcha', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Security-Token': securityToken,
+            'X-Request-ID': requestId
+          },
+          body: JSON.stringify({
+            // Challenge identification
+            challengeId: challenge.id,
+            initialRequestId: requestId,
+            timestamp: Date.now(),
+            token: securityToken,
+            
+            // Results from automatic tests
+            challengeSolution: {
+              testResults: verificationResults.testResults,
+              finalChainHash: verificationResults.finalChainHash,
+              completionTime: verificationResults.completionTime,
+              powResult: verificationResults.powResult
+            },
+            
+            // Results from interactive challenge
+            interactiveChallenge: interactiveResult,
+            
+            // Environment data
+            environment: {
+              ...currentEnvData,
+              
+              // Time & location info
+              timeZone: {
+                offset: new Date().getTimezoneOffset(),
+                timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+              },
+              
+              // Connection information (if available)
+              connection: getConnectionInfo(),
+              
+              // Feature detection
+              features: detectFeatures()
+            },
+            
+            // Behavioral data
+            behavior: fullBehaviorData,
+            
+            // Performance data
+            performance: {
+              navigationTiming: getNavigationTiming(),
+              resourceTiming: getResourceTiming(),
+              memoryInfo: getMemoryInfo()
+            }
+          })
+        });
+
+        const verification = await response.json();
+        return verification;
+
+      } catch (error) {
+        console.error("Error submitting interactive CAPTCHA results:", error);
+        showError("Failed to complete verification process");
+        return { valid: false, error: error.message };
+      }
+    }
+
     // Load the CAPTCHA suite script
     function loadCaptchaSuite(suiteUrl) {
       updateStatus("Loading verification...");
@@ -341,6 +507,17 @@
       statusDiv.style.padding = '10px';
       statusDiv.innerText = 'Initializing verification...';
       container.appendChild(statusDiv);
+      
+      // Add graphic container for visual challenges
+      const graphicDiv = document.createElement('div');
+      graphicDiv.id = 'captcha-graphic';
+      graphicDiv.style.display = 'none';
+      graphicDiv.style.position = 'relative';
+      graphicDiv.style.minHeight = '200px'; 
+      graphicDiv.style.margin = '20px 0';
+      graphicDiv.style.border = '1px solid #eee';
+      graphicDiv.style.borderRadius = '5px';
+      container.appendChild(graphicDiv);
     }
     
     // Update status message in the CAPTCHA container
