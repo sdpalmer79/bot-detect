@@ -4,7 +4,8 @@ const { evaluateTokenVerification, evaluateWebglFingerprinting } = require('./ve
 const MAX_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_CHALLENGE_AGE, 5 * 60 * 1000);
 const CHALLENGE_POW_DIFFICULTY = parseEnvNumber(process.env.CHALLENGE_POW_DIFFICULTY, 2);
 // Threshold for triggering interactive verification (0.0-1.0)
-const INTERACTIVE_CHALLENGE_THRESHOLD = parseEnvNumber(process.env.INTERACTIVE_CHALLENGE_THRESHOLD, 0.0);
+const INTERACTIVE_CHALLENGE_THRESHOLD = parseEnvNumber(process.env.INTERACTIVE_CHALLENGE_THRESHOLD, 0.6);
+const MAX_INTERACTIVE_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_INTERACTIVE_CHALLENGE_AGE, 3 * 60 * 1000);
 
 function parseEnvNumber(value, defaultValue) {
     if (value === undefined || value === null || value === '') {
@@ -46,12 +47,15 @@ function createInteractiveChallenge(challenge, botProbability) {
   // Higher bot probability = harder challenge
   const difficultyLevel = Math.min(Math.floor(botProbability * 10) + 1, 10);
   
+  // Select appropriate challenge type based on bot probability
+  const challengeType = selectChallengeType(botProbability);
+  
   // Create the interactive challenge configuration
   const interactiveChallenge = {
     id: `${challenge.id}-interactive`,
     parentChallengeId: challenge.id,
     timestamp: Date.now(),
-    expiry: Date.now() + MAX_CHALLENGE_AGE,
+    expiry: Date.now() + MAX_INTERACTIVE_CHALLENGE_AGE,
     botProbability: botProbability,
     
     // Parameters used by the client to render the appropriate challenge
@@ -62,7 +66,7 @@ function createInteractiveChallenge(challenge, botProbability) {
       },
       difficulty: difficultyLevel,
       maxAttempts: 3,
-      type: selectChallengeType(botProbability)
+      type: challengeType // Challenge type as selected by our function
     }
   };
   
@@ -75,21 +79,41 @@ function createInteractiveChallenge(challenge, botProbability) {
  * @returns {string} Challenge type identifier
  */
 function selectChallengeType(botProbability) {
-  // For very high bot probability, use more complex challenges
-  if (botProbability > 0.8) {
-    return "pattern_completion";
+  // Available challenge types ordered by increasing complexity
+  const availableChallengeTypes = [
+    "pattern_completion",   // Currently fully implemented
+    "image_selection",      // Will be implemented next
+    "object_orientation"    // More complex, to be implemented later
+  ];
+  
+  // For very high bot probability, use the most complex challenge available
+  if (botProbability > 0.85) {
+    // If object_orientation is implemented, use that for high-risk sessions
+    if (isImplemented("object_orientation")) {
+      return "object_orientation";
+    }
   } 
-  // For medium-high probability
-  else if (botProbability > 0.7) {
-    return "pattern_completion";
-  } 
-  // For lower probability
-  else {
-    return "pattern_completion";
+  
+  // For medium-high probability, use image selection if available
+  if (botProbability > 0.7) {
+    if (isImplemented("image_selection")) {
+      return "image_selection";
+    }
   }
   
-  // Additional challenge types can be added as they're implemented
-  // e.g., "image_selection", "object_orientation", etc.
+  // Default to pattern completion which is known to be implemented
+  return "pattern_completion";
+}
+
+/**
+ * Helper function to check if a challenge type is implemented
+ * This would ideally check a configuration or the filesystem
+ * For now, only pattern_completion is considered implemented
+ */
+function isImplemented(challengeType) {
+  // For now, only pattern_completion is fully implemented
+  // This would ideally check for the existence of modules or configuration
+  return challengeType === "pattern_completion";
 }
 
 function getRequestFingerprint(request) {

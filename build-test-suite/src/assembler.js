@@ -1,12 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+// Import interactive components
+const { PatternGenerator, InteractionUI } = require('./interactiveComponents');
 
-// Load all test templates
-const testTemplates = loadAllTestTemplates();
+// Separate loading of automatic and interactive templates
+const automaticTemplates = loadAutomaticTemplates();
+const interactiveTemplates = loadInteractiveTemplates();
 
-// Loads all test templates from the templates directory
-function loadAllTestTemplates() {
+// Load all automatic test templates from autoTemplates.js
+function loadAutomaticTemplates() {
   // Import test template modules
   const {
     tokenTests,
@@ -20,16 +23,8 @@ function loadAllTestTemplates() {
     automationTests
   } = require('./autoTemplates');
   
-  // Import interactive visual challenge templates
-  const {
-    patternCompletionTests,
-    imageSelectionTests,
-    objectOrientationTests
-  } = require('./interactiveTemplates');
-
-  // Return combined templates object
+  // Return automatic templates object
   return {
-    // Automatic tests
     tokenTests,
     webglTests, 
     timingTests, 
@@ -38,9 +33,21 @@ function loadAllTestTemplates() {
     networkTests,
     inputBehaviorTests,
     deviceIntegrityTests,
-    automationTests,
-    
-    // Interactive tests
+    automationTests
+  };
+}
+
+// Load all interactive test templates from interactiveTemplates.js
+function loadInteractiveTemplates() {
+  // Import interactive visual challenge templates
+  const {
+    patternCompletionTests,
+    imageSelectionTests,
+    objectOrientationTests
+  } = require('./interactiveTemplates');
+  
+  // Return interactive templates object
+  return {
     patternCompletionTests,
     imageSelectionTests,
     objectOrientationTests
@@ -49,7 +56,7 @@ function loadAllTestTemplates() {
 
 /**
  * Selects multiple tests from a category
- * @param {Object} templates - All test templates
+ * @param {Object} templates - Test templates
  * @param {string} category - Category name (e.g., 'timingTests')
  * @param {Object} options - Selection options
  * @param {number} [options.maxCount=1] - Maximum number of tests to select
@@ -129,22 +136,22 @@ function selectMultipleFromCategory(templates, category, options = {}) {
   return selectedTests;
 }
   
-  // Deterministic pseudo-random number generator
-  class PseudoRandom {
-    constructor(seed) {
-      this.seed = seed % 2147483647;
-      if (this.seed <= 0) this.seed += 2147483646;
-    }
-    
-    next() {
-      this.seed = (this.seed * 16807) % 2147483647;
-      return this.seed / 2147483647;
-    }
+// Deterministic pseudo-random number generator
+class PseudoRandom {
+  constructor(seed) {
+    this.seed = seed % 2147483647;
+    if (this.seed <= 0) this.seed += 2147483646;
+  }
+  
+  next() {
+    this.seed = (this.seed * 16807) % 2147483647;
+    return this.seed / 2147483647;
+  }
 }
 
 /**
  * Selects random tests from various categories to use as dummy tests
- * @param {Object} templates - All test templates
+ * @param {Object} templates - Automatic test templates
  * @param {string} seed - Seed for deterministic selection
  * @param {Array<string>} excludeIds - IDs of tests to exclude
  * @param {Object} [options] - Selection options
@@ -162,7 +169,7 @@ function selectRandomDummyTests(templates, seed, excludeIds, options = {}) {
     const maxCount = options.maxCount || 5;
     const count = minCount + Math.floor(rng.next() * (maxCount - minCount + 1));
     
-    // Get preferred categories or use all available
+    // Get preferred categories or use all available automatic categories
     const preferredCategories = options.preferredCategories || Object.keys(templates);
     
     // Collect all available tests from preferred categories
@@ -197,7 +204,7 @@ function selectRandomDummyTests(templates, seed, excludeIds, options = {}) {
       ...test,
       isRealTest: false
     }));
-  }
+}
   
 // Select a mix of tests
 function selectTests(seed, templates) {
@@ -248,55 +255,59 @@ function selectTests(seed, templates) {
  * based on the automatic test results and bot probability assessment
  * 
  * @param {string} seed - Seed for deterministic selection
- * @param {Object} templates - All test templates
+ * @param {Object} templates - Interactive templates
  * @return {Array<Object>} - Selected interactive tests marked with isInteractive: true
  */
 function selectInteractiveTests(seed, templates) {
   // Get interactive test categories
-  const interactiveCategories = [
-    'patternCompletionTests',
-    'imageSelectionTests',
-    'objectOrientationTests'
-  ];
+  const interactiveCategories = Object.keys(templates);
   
   // Create a deterministic random number generator
   const seedInt = parseInt(seed.substring(0, 8), 16);
   const rng = new PseudoRandom(seedInt);
   
-  // Select at least one test from each difficulty level (easy, medium, hard)
-  const difficulties = {
-    easy: { min: 1, max: 3 },    // Difficulty levels 1-3
-    medium: { min: 4, max: 6 },  // Difficulty levels 4-6
-    hard: { min: 7, max: 10 }    // Difficulty levels 7-10
-  };
-  
+  // We want to select at least one test variation from each implemented category
   const selectedTests = [];
   
-  // For each difficulty level, select one test
-  Object.entries(difficulties).forEach(([level, range]) => {
-    // Collect all tests within this difficulty range
-    const testsInRange = [];
-    
-    interactiveCategories.forEach(category => {
-      if (templates[category]?.variations) {
-        const matchingTests = templates[category].variations.filter(
-          test => test.difficultyLevel >= range.min && test.difficultyLevel <= range.max
-        );
-        testsInRange.push(...matchingTests);
-      }
-    });
-    
-    // If we have tests in this range, select one randomly
-    if (testsInRange.length > 0) {
-      const selectedIndex = Math.floor(rng.next() * testsInRange.length);
-      const selectedTest = testsInRange[selectedIndex];
+  // For each category, select one test of each difficulty level if available
+  interactiveCategories.forEach(category => {
+    if (templates[category]?.variations) {
+      // Group variations by difficulty level range
+      const difficultyGroups = {
+        easy: [], // Difficulty levels 1-3
+        medium: [], // Difficulty levels 4-7
+        hard: []  // Difficulty levels 8-10
+      };
       
-      // Mark test as interactive
-      selectedTests.push({
-        ...selectedTest,
-        isInteractive: true,
-        difficultyLevel: selectedTest.difficultyLevel || range.min,
-        isRealTest: false // Interactive tests don't run in the automatic test chain
+      // Sort tests into difficulty groups
+      templates[category].variations.forEach(test => {
+        const difficulty = test.difficultyLevel || 5; // Default to medium
+        
+        if (difficulty <= 3) {
+          difficultyGroups.easy.push(test);
+        } else if (difficulty <= 7) {
+          difficultyGroups.medium.push(test);
+        } else {
+          difficultyGroups.hard.push(test);
+        }
+      });
+      
+      // Select one test from each difficulty group within the category
+      Object.entries(difficultyGroups).forEach(([level, tests]) => {
+        if (tests.length > 0) {
+          // Select a random test from this difficulty level
+          const selectedIndex = Math.floor(rng.next() * tests.length);
+          const selectedTest = tests[selectedIndex];
+          
+          // Mark test as interactive and add category information
+          selectedTests.push({
+            ...selectedTest,
+            isInteractive: true,
+            categoryName: templates[category].category, // Add category name (challenge type)
+            difficultyLevel: selectedTest.difficultyLevel,
+            isRealTest: false // Interactive tests don't run in the automatic test chain
+          });
+        }
       });
     }
   });
@@ -308,6 +319,7 @@ function selectInteractiveTests(seed, templates) {
       id: "fallback_pattern_completion",
       description: "Fallback pattern completion challenge",
       difficultyLevel: 5,
+      categoryName: "pattern_completion", // Static category name
       isInteractive: true,
       isRealTest: false,
       code: `async function TEST_FUNCTION_NAME(ctx) {
@@ -518,6 +530,11 @@ function assembleSuiteCode(chainedTests, suiteSeed, interactiveTests) {
 // Automatically generated CAPTCHA suite
 // Suite ID: ${suiteSeed}
 // Generated: ${new Date().toISOString()}
+
+// Interactive component classes for pattern generation and UI
+${PatternGenerator.toString()}
+
+${InteractionUI.toString()}
 
 // Test implementation
 const testImplementations = {
@@ -807,11 +824,16 @@ async function activateInteractiveChallenge(type, params) {
 
 // Initialize CaptchaSystem with integrated proof of work
 window.CaptchaSystem = {
+  // Make the interactive component classes available to the client
+  interactionClasses: {
+    PatternGenerator,
+    InteractionUI
+  },
+  
   verify: async function(challenge) {
     console.log("Starting verification for challenge:", challenge.id);
     
     try {
-
       // Step 1: Perform proof of work
       console.log("Running proof of work...");
       const powResult = await runProofOfWork(challenge);
@@ -878,13 +900,13 @@ function generateUniqueSuite(suiteId, baseSuiteDir) {
     const suiteSeed = crypto.randomBytes(16).toString('hex');
     
     // 1. Select automatic tests
-    const selectedTests = selectTests(suiteSeed, testTemplates);
+    const selectedAutomaticTests = selectTests(suiteSeed, automaticTemplates);
     
     // 2. Select interactive tests of various difficulty levels
-    const selectedInteractiveTests = selectInteractiveTests(suiteSeed, testTemplates);
+    const selectedInteractiveTests = selectInteractiveTests(suiteSeed, interactiveTemplates);
     
     // 3. Generate unique test order for automatic tests
-    const testOrder = shuffleTests(selectedTests, suiteSeed);
+    const testOrder = shuffleTests(selectedAutomaticTests, suiteSeed);
     
     // 4. Create test chain linkages for automatic tests
     const chainedTests = createTestChain(testOrder, suiteSeed);
@@ -906,29 +928,26 @@ function generateUniqueSuite(suiteId, baseSuiteDir) {
       created: new Date().toISOString(),
       suiteSeed: suiteSeed,
       
-      // Complete test information
-      tests: [
-        // Automatic tests with chaining
-        ...chainedTests.map(test => ({
-          id: test.id,
-          originalId: test.originalId,
-          functionName: test.functionName,
-          isRealTest: test.isRealTest,
-          dependsOn: test.dependsOn,
-          paramValues: test.paramValues,
-          isInteractive: false
-        })),
-        
-        // Interactive tests (not part of automatic chain)
-        ...selectedInteractiveTests.map(test => ({
-          id: test.id,
-          originalId: test.id,
-          functionName: `interactive_${test.id}`,
-          isInteractive: true,
-          difficultyLevel: test.difficultyLevel,
-          paramValues: generateTestParams(test, suiteSeed + '_interactive_' + test.id)
-        }))
-      ],
+      // Only include automatic tests in the tests array (critical for verification)
+      tests: chainedTests.map(test => ({
+        id: test.id,
+        originalId: test.originalId,
+        functionName: test.functionName,
+        isRealTest: test.isRealTest,
+        dependsOn: test.dependsOn,
+        paramValues: test.paramValues,
+        isInteractive: false
+      })),
+      
+      // Add separate array for interactive tests
+      interactiveTests: selectedInteractiveTests.map(test => ({
+        id: test.id,
+        originalId: test.id,
+        functionName: `interactive_${test.id}`,
+        isInteractive: true,
+        difficultyLevel: test.difficultyLevel,
+        paramValues: generateTestParams(test, suiteSeed + '_interactive_' + test.id)
+      }))
     };
 
     // Write suite data to file

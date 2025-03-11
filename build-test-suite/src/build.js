@@ -3,11 +3,19 @@ const { obfuscateSuite } = require('./obfuscator');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const baseSuiteDir = process.env.SUITES_BASE_DIR;
+// Use environment variable or create a temp directory if not specified
+const baseSuiteDir = process.env.SUITES_BASE_DIR || path.join(os.tmpdir(), 'captcha-suites');
+
+// Ensure the directory exists
+if (!fs.existsSync(baseSuiteDir)) {
+  fs.mkdirSync(baseSuiteDir, { recursive: true });
+}
 
 async function buildSuites(count = 1) {
   console.log(`Building ${count} CAPTCHA suites...`);
+  console.log(`Using suite directory: ${baseSuiteDir}`);
   
   const results = [];
   

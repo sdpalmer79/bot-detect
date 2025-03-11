@@ -9,8 +9,8 @@ async function obfuscateSuite(suiteInfo) {
   // Read the source suite
   let sourceCode = fs.readFileSync(path.join(suiteDir, 'test-suite.src.js'), 'utf8');
   
-  // Add runtime debug protection
-  sourceCode = addDebugProtections(sourceCode);
+  // DISABLED FOR DEBUGGING: Add runtime debug protection
+  // sourceCode = addDebugProtections(sourceCode);
   
   // Generate unique obfuscation options for this suite
   const obfuscationOptions = generateUniqueObfuscationOptions(suiteId);
@@ -48,9 +48,10 @@ function generateUniqueObfuscationOptions(suiteId) {
     compact: true,
     controlFlowFlattening: false,
     deadCodeInjection: false,
-    debugProtection: true,            // ENABLE: basic debugging prevention
-    debugProtectionInterval: 4000,    // Long interval = minimal performance impact
-    disableConsoleOutput: true,
+    // DISABLED FOR DEBUGGING
+    debugProtection: false,            // DISABLE: basic debugging prevention
+    debugProtectionInterval: 0,        // DISABLE: debug protection interval
+    disableConsoleOutput: false,       // ENABLE console for debugging
     
     // Rename variables and transform strings
     identifierNamesGenerator: 'hexadecimal',
