@@ -370,47 +370,40 @@
           
           updateStatus("Please complete the visual challenge");
           
-          // Use the built-in CaptchaSystem.runInteractiveChallenge function
-          // instead of loading a separate module
-          if (!window.CaptchaSystem || !window.CaptchaSystem.runInteractiveChallenge) {
-            throw new Error("Interactive challenge system not available");
+          // Check if CaptchaSystem is available
+          if (!window.CaptchaSystem) {
+            throw new Error("CaptchaSystem not available");
           }
           
-          // Create InteractionUI instance for the interactive challenge
-          // This gives us access to the UI rendering capabilities
-          if (!window.CaptchaSystem.interactionClasses) {
-            throw new Error("Interactive challenge classes not available");
+          // Check if interactiveTestImplementations exists
+          if (!window.CaptchaSystem.runInteractiveChallenge) {
+            throw new Error("Interactive test implementations not available");
           }
           
-          const { PatternGenerator, InteractionUI } = window.CaptchaSystem.interactionClasses;
-          const ui = new InteractionUI(container, {
-            difficulty: interactiveChallenge.parameters.difficulty || 5,
-            seed: interactiveChallenge.parameters.seed || String(Date.now())
-          });
-          
-          // Run the appropriate challenge based on type
-          let result;
-          const challengeType = interactiveChallenge.parameters.type || 'pattern_completion';
-          
-          switch(challengeType) {
-            case 'pattern_completion':
-              result = await ui.createPatternCompletionUI(interactiveChallenge.parameters);
-              break;
-            case 'image_selection':
-              result = await ui.createImageSelectionUI(interactiveChallenge.parameters);
-              break;
-            default:
-              result = await ui.createPatternCompletionUI(interactiveChallenge.parameters);
+          // Get the function name from the challenge
+          const testFunctionName = interactiveChallenge.parameters.test;
+          if (!testFunctionName) {
+            throw new Error("No test function specified in challenge parameters");
           }
           
-          // Once the challenge is complete, resolve with the result
-          const interactionStats = ui.getInteractionStats();
-          resolve({
-            ...result,
-            challengeType,
-            interactionStats
-          });
+          // Get the actual function from interactiveTestImplementations
+          const testFunction = window.CaptchaSystem.interactiveTestImplementations[testFunctionName];
+          if (!testFunction) {
+            throw new Error(`Test function '${testFunctionName}' not found in interactiveTestImplementations`);
+          }
           
+          // Create the context object for the test function
+          const context = {
+            challenge: interactiveChallenge.parameters,
+            container: container,
+            startTime: performance.now()
+          };
+          
+          // Execute the test function directly
+          const result = await testFunction(context);
+          
+          // Return the result
+          resolve(result);
         } catch (error) {
           console.error("Interactive challenge error:", error);
           updateStatus("Error with interactive challenge");

@@ -266,77 +266,66 @@ function selectInteractiveTests(seed, templates) {
   const seedInt = parseInt(seed.substring(0, 8), 16);
   const rng = new PseudoRandom(seedInt);
   
-  // We want to select at least one test variation from each implemented category
+  // We need exactly 3 tests - one for each difficulty level
   const selectedTests = [];
   
-  // For each category, select one test of each difficulty level if available
-  interactiveCategories.forEach(category => {
-    if (templates[category]?.variations) {
-      // Group variations by difficulty level range
-      const difficultyGroups = {
-        easy: [], // Difficulty levels 1-3
-        medium: [], // Difficulty levels 4-7
-        hard: []  // Difficulty levels 8-10
-      };
-      
-      // Sort tests into difficulty groups
-      templates[category].variations.forEach(test => {
-        const difficulty = test.difficultyLevel || 5; // Default to medium
-        
-        if (difficulty <= 3) {
-          difficultyGroups.easy.push(test);
-        } else if (difficulty <= 7) {
-          difficultyGroups.medium.push(test);
-        } else {
-          difficultyGroups.hard.push(test);
-        }
-      });
-      
-      // Select one test from each difficulty group within the category
-      Object.entries(difficultyGroups).forEach(([level, tests]) => {
-        if (tests.length > 0) {
-          // Select a random test from this difficulty level
-          const selectedIndex = Math.floor(rng.next() * tests.length);
-          const selectedTest = tests[selectedIndex];
+  // Shuffle the categories to select from random ones
+  const shuffledCategories = [...interactiveCategories];
+  for (let i = shuffledCategories.length - 1; i > 0; i--) {
+    const j = Math.floor(rng.next() * (i + 1));
+    [shuffledCategories[i], shuffledCategories[j]] = [shuffledCategories[j], shuffledCategories[i]];
+  }
+  
+  // Define difficulty levels
+  const difficultyLevels = ['easy', 'medium', 'hard'];
+  
+  // For each difficulty level, select one test from a random category
+  difficultyLevels.forEach(difficultyLevel => {
+    // Group all tests from all categories by this difficulty level
+    const testsForDifficultyLevel = [];
+    
+    shuffledCategories.forEach(category => {
+      if (templates[category]?.variations) {
+        // Filter tests to only include those matching the current difficulty level
+        const matchingTests = templates[category].variations.filter(test => {
+          const difficulty = test.difficultyLevel || 5; // Default to medium
           
-          // Mark test as interactive and add category information
-          selectedTests.push({
-            ...selectedTest,
-            isInteractive: true,
-            categoryName: templates[category].category, // Add category name (challenge type)
-            difficultyLevel: selectedTest.difficultyLevel,
-            isRealTest: false // Interactive tests don't run in the automatic test chain
+          if (difficultyLevel === 'easy' && difficulty <= 3) {
+            return true;
+          } else if (difficultyLevel === 'medium' && difficulty > 3 && difficulty <= 7) {
+            return true;
+          } else if (difficultyLevel === 'hard' && difficulty > 7) {
+            return true;
+          }
+          return false;
+        });
+        
+        // Add category information to each test
+        matchingTests.forEach(test => {
+          testsForDifficultyLevel.push({
+            ...test,
+            categoryName: templates[category].category
           });
-        }
+        });
+      }
+    });
+    
+    // Randomly select one test from each difficulty level
+    if (testsForDifficultyLevel.length > 0) {
+      const selectedIndex = Math.floor(rng.next() * testsForDifficultyLevel.length);
+      const selectedTest = testsForDifficultyLevel[selectedIndex];
+      
+      // Mark test as interactive and add additional info
+      selectedTests.push({
+        ...selectedTest,
+        isInteractive: true,
+        difficultyLevel: selectedTest.difficultyLevel || 
+          (difficultyLevel === 'easy' ? 2 : difficultyLevel === 'medium' ? 5 : 8),
       });
     }
   });
   
-  // Ensure we have at least one interactive test even if categories are empty
-  if (selectedTests.length === 0) {
-    // Fallback test (simplified pattern completion)
-    selectedTests.push({
-      id: "fallback_pattern_completion",
-      description: "Fallback pattern completion challenge",
-      difficultyLevel: 5,
-      categoryName: "pattern_completion", // Static category name
-      isInteractive: true,
-      isRealTest: false,
-      code: `async function TEST_FUNCTION_NAME(ctx) {
-        try {
-          return {
-            challengeType: "pattern_completion",
-            success: false,
-            error: "Fallback interactive test - not implemented"
-          };
-        } catch (error) {
-          return { error: "Fallback test failed", errorMessage: error.message };
-        }
-      }`,
-      paramRanges: {}
-    });
-  }
-  
+  // We should have exactly 3 tests now - one per difficulty level
   return selectedTests;
 }
 

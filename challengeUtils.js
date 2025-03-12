@@ -42,31 +42,25 @@ function createChallengeForRequest(suiteData, request) {
  * @param {number} botProbability - Bot probability assessment from automatic tests
  * @returns {Object} Interactive challenge configuration
  */
-function createInteractiveChallenge(challenge, botProbability) {
+function createInteractiveChallenge(challenge, suiteData, botProbability) {
   // Calculate difficulty level based on bot probability (1-10 scale)
   // Higher bot probability = harder challenge
-  const difficultyLevel = Math.min(Math.floor(botProbability * 10) + 1, 10);
   
-  // Select appropriate challenge type based on bot probability
-  const challengeType = selectChallengeType(botProbability);
+  // Select appropriate interactive test based on bot probability
+  const selectedTest = selectInteractiveTest(botProbability, suiteData);
   
   // Create the interactive challenge configuration
+  // TODO Create interactive challenge id when saving to db
+  const interactiveChallengeId = uuidv4();
   const interactiveChallenge = {
-    id: `${challenge.id}-interactive`,
+    id: interactiveChallengeId,
     parentChallengeId: challenge.id,
     timestamp: Date.now(),
     expiry: Date.now() + MAX_INTERACTIVE_CHALLENGE_AGE,
-    botProbability: botProbability,
     
     // Parameters used by the client to render the appropriate challenge
     parameters: {
-      challenge: {
-        id: challenge.id,
-        timestamp: Date.now()
-      },
-      difficulty: difficultyLevel,
-      maxAttempts: 3,
-      type: challengeType // Challenge type as selected by our function
+      test: selectedTest // Use the full function name as the type
     }
   };
   
@@ -74,46 +68,34 @@ function createInteractiveChallenge(challenge, botProbability) {
 }
 
 /**
- * Selects an appropriate challenge type based on bot probability
+ * Selects an appropriate interactive test based on bot probability
  * @param {number} botProbability - Bot probability from automatic tests (0-1)
- * @returns {string} Challenge type identifier
+ * @returns {string} Function name of selected interactive test
  */
-function selectChallengeType(botProbability) {
-  // Available challenge types ordered by increasing complexity
-  const availableChallengeTypes = [
-    "pattern_completion",   // Currently fully implemented
-    "image_selection",      // Will be implemented next
-    "object_orientation"    // More complex, to be implemented later
-  ];
-  
-  // For very high bot probability, use the most complex challenge available
-  if (botProbability > 0.85) {
-    // If object_orientation is implemented, use that for high-risk sessions
-    if (isImplemented("object_orientation")) {
-      return "object_orientation";
-    }
-  } 
-  
-  // For medium-high probability, use image selection if available
-  if (botProbability > 0.7) {
-    if (isImplemented("image_selection")) {
-      return "image_selection";
-    }
-  }
-  
-  // Default to pattern completion which is known to be implemented
-  return "pattern_completion";
-}
+function selectInteractiveTest(botProbability, suiteData) {
+  // Convert bot probability to difficulty level (1-10 scale)
+  const targetDifficulty = Math.min(Math.floor(botProbability * 10) + 1, 10);
+  let test;
 
-/**
- * Helper function to check if a challenge type is implemented
- * This would ideally check a configuration or the filesystem
- * For now, only pattern_completion is considered implemented
- */
-function isImplemented(challengeType) {
-  // For now, only pattern_completion is fully implemented
-  // This would ideally check for the existence of modules or configuration
-  return challengeType === "pattern_completion";
+  // Select test by difficulty level
+  if (targetDifficulty <= 3) {
+    // Easy difficulty
+     test = suiteData.interactiveTests.find(test => test.difficultyLevel <= 3);
+  } else if (targetDifficulty <= 7) {
+    // Medium difficulty
+    test = suiteData.interactiveTests.find(test => test.difficultyLevel > 3 && test.difficultyLevel <= 7);
+  } else {
+    // Hard difficulty (8-10)
+    test = suiteData.interactiveTests.find(test => test.difficultyLevel > 7);
+  }
+
+  if (!test) {
+    throw new CaptchaError('NO_INTERACTIVE_TEST', {
+      message: `No interactive test available for the selected difficulty level in suite ${suiteData.suiteId}`,
+      details: { targetDifficulty, suiteData }
+    });
+  }
+  return test.functionName;
 }
 
 function getRequestFingerprint(request) {
@@ -126,25 +108,6 @@ function getToken(){
 }
 
 /**
- * Checks challenge expiration
- * @param {Object} challenge - Challenge data sent to client
- * @returns {Object} Expiration status information
- */
-function checkChallengeExpiration(challenge) {
-  const maxAge = MAX_CHALLENGE_AGE;
-  const challengeAge = Date.now() - challenge.timestamp;
-  const challengeExpired = challengeAge > maxAge;
-  
-  return {
-    valid: !challengeExpired,
-    challengeAge,
-    maxValidAge: maxAge,
-    expiryTime: challenge.timestamp + maxAge,
-    remainingTime: Math.max(0, (challenge.timestamp + maxAge) - Date.now())
-  };
-}
-
-/**
  * Verifies CAPTCHA submission results
  * @param {Object} submission - User submission data
  * @param {Object} challenge - Challenge data sent to client
@@ -153,158 +116,212 @@ function checkChallengeExpiration(challenge) {
  */
 async function verifySubmission(submission, challenge, suiteData) {
   try {
-    // Check challenge expiration
-    const expirationCheck = checkChallengeExpiration(challenge);
-    if (!expirationCheck.valid) {
-      throw new CaptchaError('CHALLENGE_EXPIRED', { message: 'Challenge expired:', expirationCheck});
-    }
+    // Verify challenge is still valid
+    verifyExpiration(challenge);
+    
+    // Verify proof of work
+    verifyProofOfWork(submission);
+    
+    // Evaluate automatic test results
+    const testEvaluations = await evaluateAutomaticTests(submission, challenge, suiteData);
+    
+    // Calculate combined bot probability
+    const totalBotProbability = calculateCombinedBotProbability(testEvaluations);
+    console.log(`Total bot probability from automatic tests: ${totalBotProbability.toFixed(3)}`);
+    
+    // Return results based on three possible scenarios
+    return determineVerificationResult(submission, challenge, suiteData, totalBotProbability, testEvaluations);
+  } catch (error) {
+    return handleVerificationError(error);
+  }
+}
 
-    console.log('Verifying proof of work...');
-    const powValid = submission.challengeSolution.powResult && 
-                  submission.challengeSolution.powResult.hash && 
-                  submission.challengeSolution.powResult.hash.startsWith('00');
+/**
+ * Verifies if challenge has not expired
+ */
+function verifyExpiration(challenge) {
+  console.log('Verifying challenge expiration...');
+  const maxAge = MAX_CHALLENGE_AGE;
+  const challengeAge = Date.now() - challenge.timestamp;
+  const challengeExpired = challengeAge > maxAge;
+  
+  if (challengeExpired) {
+    throw new CaptchaError('CHALLENGE_EXPIRED', { message: 'Challenge expired', details: { challenge, maxAge, challengeAge, challengeExpired }} );
+  }
+}
 
-    if (!powValid) {
-      throw new CaptchaError('INVALID_PROOF_OF_WORK', {
-        message: 'Invalid proof of work',
-        details: { powResult: submission.powResult }
+/**
+ * Verifies the proof of work result
+ */
+function verifyProofOfWork(submission) {
+  console.log('Verifying proof of work...');
+  const powValid = submission.challengeSolution.powResult && 
+                submission.challengeSolution.powResult.hash && 
+                submission.challengeSolution.powResult.hash.startsWith('00');
+
+  if (!powValid) {
+    throw new CaptchaError('INVALID_PROOF_OF_WORK', {
+      message: 'Invalid proof of work',
+      details: { powResult: submission.powResult }
+    });
+  }
+}
+
+/**
+ * Evaluates all automatic tests in the submission
+ * @param {Object} submission - User submission data
+ * @param {Object} challenge - Challenge data sent to client
+ * @param {Object} suiteData - Suite configuration data
+ * @returns {Map} Map of test evaluations
+ */
+async function evaluateAutomaticTests(submission, challenge, suiteData) {
+  console.log('Evaluating automatic test results...');
+  const testEvaluations = new Map();
+  
+  // Filter for real tests (not dummy tests)
+  for (const test of suiteData.tests.filter(test => test.isRealTest)) {
+    console.log(`Evaluating test ${test.originalId}...`);
+    
+    // Check if the test result exists
+    if (!submission.challengeSolution.testResults || 
+        !submission.challengeSolution.testResults.hasOwnProperty(test.id)) {
+      throw new CaptchaError('MISSING_TEST_RESULT', {
+        message: `Missing test result for test ${test.originalId} (ID: ${test.id})`,
+        details: {
+          testId: test.id,
+          originalTestId: test.originalId,
+          availableResults: Object.keys(submission.challengeSolution.testResults || {})
+        }
       });
     }
 
-    console.log('Evaluating automatic test results...');
-    const testEvaluations = new Map();
-    
-    // Verify automatic tests first
-    for (const test of suiteData.tests.filter(test => test.isRealTest)) {
-      console.log(`Evaluating test ${test.originalId}...`);
-      
-      // Check if the test result exists
-      if (!submission.challengeSolution.testResults || 
-          !submission.challengeSolution.testResults.hasOwnProperty(test.id)) {
-        throw new CaptchaError('MISSING_TEST_RESULT', {
-          message: `Missing test result for test ${test.originalId} (ID: ${test.id})`,
-          details: {
-            testId: test.id,
-            originalTestId: test.originalId,
-            availableResults: Object.keys(submission.challengeSolution.testResults || {})
-          }
-        });
-      }
+    const result = submission.challengeSolution.testResults[test.id];
 
-      const result = submission.challengeSolution.testResults[test.id];
-
-      switch (test.originalId) {
-        case 'token_verification':
-          testEvaluations.set('token_verification', await evaluateTokenVerification(result, challenge, suiteData));
-          break;
-        case 'webgl_fingerprinting':
-          testEvaluations.set('webgl_fingerprinting', await evaluateWebglFingerprinting(result));
-          break;
-        // Additional test evaluations can be added here
-        default:
-          console.log(`Unknown test type: ${test.originalId}`);
-      }
+    switch (test.originalId) {
+      case 'token_verification':
+        testEvaluations.set('token_verification', await evaluateTokenVerification(result, challenge, suiteData));
+        break;
+      case 'webgl_fingerprinting':
+        testEvaluations.set('webgl_fingerprinting', await evaluateWebglFingerprinting(result));
+        break;
+      // Additional test evaluations can be added here
+      default:
+        console.log(`Unknown test type: ${test.originalId}`);
     }
+  }
+  
+  return testEvaluations;
+}
 
-    // Calculate combined bot probability from all automatic tests
-    let totalBotProbability = 0;
-    let totalConfidence = 0;
-    let weightedBotProbabilitySum = 0;
-    
-    testEvaluations.forEach((evaluation) => {
-      if (evaluation.botProbability !== undefined && evaluation.confidence !== undefined) {
-        weightedBotProbabilitySum += evaluation.botProbability * evaluation.confidence;
-        totalConfidence += evaluation.confidence;
-      }
-    });
-    
-    // Calculate weighted average bot probability
-    totalBotProbability = totalConfidence > 0 ? weightedBotProbabilitySum / totalConfidence : 0;
-
-    console.log(`Total bot probability from automatic tests: ${totalBotProbability.toFixed(3)}`);
-
-    // Check if interactive challenge has been submitted
-    if (submission.interactiveChallenge) {
-      console.log('Interactive challenge solution submitted, evaluating...');
-      
-      // Evaluate the interactive challenge
-      const interactiveResult = evaluateInteractiveChallenge(
-        submission.interactiveChallenge,
-        challenge
-      );
-      
-      // Adjust final bot probability based on interactive challenge results
-      const finalBotProbability = calculateFinalBotProbability(
-        totalBotProbability,
-        interactiveResult
-      );
-      
-      // Decide if the verification is valid based on final probability
-      const valid = finalBotProbability < 0.4; // Threshold for accepting as human
-      
-      return {
-        valid,
-        botProbability: finalBotProbability,
-        requiresInteractiveChallenge: false, // Already completed
-        details: {
-          automaticTestResults: Object.fromEntries(testEvaluations),
-          interactiveTestResult: interactiveResult
-        }
-      };
+/**
+ * Calculate weighted average bot probability from all tests
+ */
+function calculateCombinedBotProbability(testEvaluations) {
+  let totalConfidence = 0;
+  let weightedBotProbabilitySum = 0;
+  
+  testEvaluations.forEach((evaluation) => {
+    if (evaluation.botProbability !== undefined && evaluation.confidence !== undefined) {
+      weightedBotProbabilitySum += evaluation.botProbability * evaluation.confidence;
+      totalConfidence += evaluation.confidence;
     }
-    
-    // Check if bot probability exceeds threshold to trigger interactive challenge
-    if (totalBotProbability >= INTERACTIVE_CHALLENGE_THRESHOLD) {
-      console.log('Bot probability threshold exceeded, interactive challenge required');
-      
-      // Create interactive challenge configuration
-      const interactiveChallenge = createInteractiveChallenge(
-        challenge,
-        totalBotProbability
-      );
-      
-      return {
-        valid: false,
-        botProbability: totalBotProbability,
-        requiresInteractiveChallenge: true,
-        interactiveChallenge: interactiveChallenge,
-        details: {
-          automaticTestResults: Object.fromEntries(testEvaluations)
-        }
-      };
+  });
+  
+  // Calculate weighted average bot probability
+  return totalConfidence > 0 ? weightedBotProbabilitySum / totalConfidence : 0;
+}
+
+/**
+ * Determine the verification result based on the bot probability and submission
+ */
+function determineVerificationResult(submission, challenge, suiteData, totalBotProbability, testEvaluations) {
+  // Base result structure with automatic test results
+  const baseResult = {
+    botProbability: totalBotProbability,
+    details: {
+      automaticTestResults: Object.fromEntries(testEvaluations)
     }
+  };
+
+  // CASE 1: Interactive challenge already submitted
+  if (submission.interactiveChallenge) {
+    console.log('Interactive challenge solution submitted, evaluating...');
     
-    // If bot probability is below threshold, verification is successful without interactive challenge
+    // Evaluate the interactive challenge
+    const interactiveResult = evaluateInteractiveChallenge(
+      submission.interactiveChallenge,
+      challenge
+    );
+    
+    // Adjust final bot probability based on interactive challenge results
+    const finalBotProbability = calculateFinalBotProbability(
+      totalBotProbability,
+      interactiveResult
+    );
+    
     return {
-      valid: true,
-      botProbability: totalBotProbability,
-      requiresInteractiveChallenge: false,
+      ...baseResult,
+      valid: finalBotProbability < 0.4, // Threshold for accepting as human
+      botProbability: finalBotProbability,
+      requiresInteractiveChallenge: false, // Already completed
       details: {
-        automaticTestResults: Object.fromEntries(testEvaluations)
+        ...baseResult.details,
+        interactiveTestResult: interactiveResult
       }
-    };
-  } catch (error) {
-    if (error instanceof CaptchaError) {
-      // Log error
-      console.error('Verification error:', error);
-      
-      // Return structured error response for known failure cases
-      return {
-        valid: false,
-        errorCode: error.code,
-        message: error.message,
-        details: error.details
-      };
-    }
-    
-    // For unexpected errors, return minimal information
-    console.error('Unexpected verification error:', error);
-    return {
-      valid: false,
-      errorCode: 'VERIFICATION_ERROR',
-      message: 'An unexpected error occurred during verification'
     };
   }
+  
+  // CASE 2: Bot probability exceeds threshold, need interactive challenge
+  if (totalBotProbability >= INTERACTIVE_CHALLENGE_THRESHOLD) {
+    console.log('Bot probability threshold exceeded, interactive challenge required');
+    
+    // Create interactive challenge configuration
+    const interactiveChallenge = createInteractiveChallenge(
+      challenge,
+      suiteData,
+      totalBotProbability
+    );
+    
+    return {
+      ...baseResult,
+      valid: false,
+      requiresInteractiveChallenge: true,
+      interactiveChallenge: interactiveChallenge
+    };
+  }
+  
+  // CASE 3: Bot probability below threshold, verification successful
+  return {
+    ...baseResult,
+    valid: true,
+    requiresInteractiveChallenge: false
+  };
+}
+
+/**
+ * Handle verification errors with consistent response format
+ */
+function handleVerificationError(error) {
+  if (error instanceof CaptchaError) {
+    // Log error
+    console.error('Verification error:', error);
+    
+    // Return structured error response for known failure cases
+    return {
+      valid: false,
+      errorCode: error.code,
+      message: error.message,
+      details: error.details
+    };
+  }
+  
+  // For unexpected errors, return minimal information
+  console.error('Unexpected verification error:', error);
+  return {
+    valid: false,
+    errorCode: 'VERIFICATION_ERROR',
+    message: 'An unexpected error occurred during verification'
+  };
 }
 
 /**
@@ -480,5 +497,5 @@ module.exports = {
   createChallengeForRequest, 
   verifySubmission,
   createInteractiveChallenge,
-  checkChallengeExpiration
+  selectInteractiveTest
 };
