@@ -387,19 +387,56 @@ const numberSequenceCompletionTests = {
             
             // Helper function to create a simple PRNG from seed
             function createPRNGFromSeed(seed) {
+              // Suite-specific transform seed makes each suite's PRNG uniquely different
+              const TRANSFORM_SEED = PARAM_TRANSFORM_SEED;
+              
+              // Convert transform seed to usable values
+              const seedTransforms = [];
+              for (let i = 0; i < TRANSFORM_SEED.length; i += 2) {
+                if (i + 1 < TRANSFORM_SEED.length) {
+                  seedTransforms.push(parseInt(TRANSFORM_SEED.substring(i, i + 2), 16));
+                }
+              }
+              
+              // Apply suite-specific transformation to input seed before hashing
+              let transformedSeed = seed;
+              for (let i = 0; i < Math.min(seedTransforms.length, 8); i++) {
+                const transformValue = seedTransforms[i];
+                
+                // Apply different transformations based on transform value
+                if (transformValue % 4 === 0) {
+                  // Rotate characters
+                  const rotatePos = transformValue % transformedSeed.length;
+                  transformedSeed = transformedSeed.slice(rotatePos) + transformedSeed.slice(0, rotatePos);
+                } else if (transformValue % 4 === 1) {
+                  // Add suite-specific character sequence
+                  transformedSeed += String.fromCharCode(64 + (transformValue % 63));
+                } else if (transformValue % 4 === 2) {
+                  // Reverse seed
+                  transformedSeed = transformedSeed.split('').reverse().join('');
+                } else {
+                  // XOR with transform value
+                  transformedSeed = transformedSeed.split('').map(
+                    (c, idx) => String.fromCharCode(c.charCodeAt(0) ^ ((idx + transformValue) % 256))
+                  ).join('');
+                }
+              }
+              
               // Convert string seed to a number using simple hash
               let numericSeed = 0;
-              for (let i = 0; i < seed.length; i++) {
-                numericSeed = ((numericSeed << 5) - numericSeed) + seed.charCodeAt(i);
+              for (let i = 0; i < transformedSeed.length; i++) {
+                numericSeed = ((numericSeed << 5) - numericSeed) + transformedSeed.charCodeAt(i);
                 numericSeed = numericSeed & numericSeed; // Convert to 32bit integer
               }
               
-              // Use a simple Linear Congruential Generator
+              // Use a simple Linear Congruential Generator with suite-specific parameters
               let state = Math.abs(numericSeed) || 1;
+              const a = 1664525 + (seedTransforms[0] % 1024); // Modify multiplier
+              const c = 1013904223 + (seedTransforms[1] % 1024); // Modify increment
               
               return function() {
-                // LCG parameters - using values from Numerical Recipes
-                state = (1664525 * state + 1013904223) % 4294967296;
+                // LCG parameters - using modified values 
+                state = (a * state + c) % 4294967296;
                 return state;
               };
             }
@@ -461,7 +498,8 @@ const numberSequenceCompletionTests = {
         }
       }`,
       paramRanges: {
-        "PARAM_DISTORTION": { min: 1, max: 3, step: 1 }
+        "PARAM_DISTORTION": { min: 1, max: 3, step: 1 },
+        "PARAM_TRANSFORM_SEED": "SUITE_TRANSFORM_SEED"
       }
     }
   ]
