@@ -13,6 +13,7 @@ if (!fs.existsSync(baseSuiteDir)) {
   fs.mkdirSync(baseSuiteDir, { recursive: true });
 }
 
+
 async function buildSuites(count = 1) {
   console.log(`Building ${count} CAPTCHA suites...`);
   console.log(`Using suite directory: ${baseSuiteDir}`);
