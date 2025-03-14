@@ -1,8 +1,19 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-// Import interactive components
-const { PatternGenerator, InteractionUI } = require('./interactiveComponents');
+const sharedCode = require('@sdpalmer79/captcha-shared-code');
+
+const MIN_TESTS = parseEnvNumber(process.env.MIN_TESTS, 1);
+const MIN_INTERACTIVE_TESTS = parseEnvNumber(process.env.MIN_INTERACTIVE_TESTS, 1); 
+
+function parseEnvNumber(value, defaultValue) {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+  
+  const num = Number(value);
+  return !isNaN(num) ? num : defaultValue;
+}
 
 // Separate loading of automatic and interactive templates
 const automaticTemplates = loadAutomaticTemplates();
@@ -41,16 +52,12 @@ function loadAutomaticTemplates() {
 function loadInteractiveTemplates() {
   // Import interactive visual challenge templates
   const {
-    patternCompletionTests,
-    imageSelectionTests,
-    objectOrientationTests
+    numberSequenceCompletionTests
   } = require('./interactiveTemplates');
   
   // Return interactive templates object
   return {
-    patternCompletionTests,
-    imageSelectionTests,
-    objectOrientationTests
+    numberSequenceCompletionTests
   };
 }
 
@@ -242,6 +249,11 @@ function selectTests(seed, templates) {
       ...networkTests
     ].map(test => ({ ...test, isRealTest: true }));
     
+    // Throw an error if we don't have enough tests
+    if (coreTests.length < MIN_TESTS) {
+      throw new Error(`Failed to select enough core tests: ${coreTests.length}`);
+    } 
+
     // Select dummy tests from any category
     const selectedIds = coreTests.map(t => t.id);
     const dummyTests = selectRandomDummyTests(templates, seed, selectedIds);
@@ -279,7 +291,7 @@ function selectInteractiveTests(seed, templates) {
   // Define difficulty levels
   const difficultyLevels = ['easy', 'medium', 'hard'];
   
-  // For each difficulty level, select one test from a random category
+  // For each difficulty level, attempt to select one test from a random category
   difficultyLevels.forEach(difficultyLevel => {
     // Group all tests from all categories by this difficulty level
     const testsForDifficultyLevel = [];
@@ -315,17 +327,29 @@ function selectInteractiveTests(seed, templates) {
       const selectedIndex = Math.floor(rng.next() * testsForDifficultyLevel.length);
       const selectedTest = testsForDifficultyLevel[selectedIndex];
       
-      // Mark test as interactive and add additional info
+      // Add the selected test to the final list
+      const uniqueId = `test_${crypto.createHash('sha256').update(seed + selectedIndex).digest('hex').substring(0, 8)}`;
+    
+      // Create a unique name for this test function
+      const functionName = `interactive_${uniqueId}`;
+    
       selectedTests.push({
-        ...selectedTest,
+        id: uniqueId,
+        functionName,
+        originalId: selectedTest.id,
+        code: selectedTest.code,
         isInteractive: true,
-        difficultyLevel: selectedTest.difficultyLevel || 
-          (difficultyLevel === 'easy' ? 2 : difficultyLevel === 'medium' ? 5 : 8),
+        difficultyLevel: selectedTest.difficultyLevel,
+        paramValues: generateTestParams(selectedTest, seed + selectedIndex, { transformSeed: seed})
       });
     }
   });
+
+  // If we don't have enough tests, throw an error. max tests is always 3 - one for each difficulty level
+  if (selectedTests.length < MIN_INTERACTIVE_TESTS) {
+    throw new Error(`Failed to select enough interactive tests: ${selectedTests.length}`);
+  }
   
-  // We should have exactly 3 tests now - one per difficulty level
   return selectedTests;
 }
 
@@ -460,6 +484,30 @@ function generateTestFunctions(chainedTests) {
 }
 
 /**
+ * Generates code for interactive test implementations
+ * @param {Array<Object>} interactiveTests - Array of interactive test objects
+ * @param {string} suiteSeed - Unique seed for this suite
+ * @return {string} - Generated JavaScript code for interactive tests
+ */
+function generateInteractiveTestFunctions(interactiveTests, suiteSeed) {
+  return interactiveTests.map(test => {
+    // Replace parameter placeholders with actual values
+    let code = test.code;
+    const paramValues = generateTestParams(test, suiteSeed + '_interactive_' + test.id);
+    Object.entries(paramValues).forEach(([key, value]) => {
+      code = code.replace(new RegExp(key, 'g'), JSON.stringify(value));
+    });
+    
+    // Replace function name placeholder
+    const functionName = `interactive_${test.id}`;
+    code = code.replace('TEST_FUNCTION_NAME', functionName);
+    
+    // Add function to the interactive test implementations object
+    return `  "${test.id}": ${code}`;
+  }).join(',\n\n');
+}
+
+/**
  * Generates code for executing tests in a chain, with centralized result hashing
  * @param {Array<Object>} chainedTests - Array of chained tests
  * @return {string} - Generated JavaScript code for test execution chain
@@ -489,8 +537,13 @@ function generateTestExecutionChain(chainedTests) {
   return hashingFunction + '\n' + executionCode;
 }
 
+/** 
+ * Generates the test runner function that enforces chaining
+ * @param {Array<Object>} chainedTests - Array of chained tests
+ * @return {string} - Generated JavaScript code for the test runner
+ */
 function generateChainedTestRunner(chainedTests) {
-  return `
+  return `// Test runner that enforces chaining
 async function runChainedTests(testContext) {
   const results = {};
   let previousHash = testContext.powHash || "initial";
@@ -513,43 +566,21 @@ async function runChainedTests(testContext) {
 }`;
 }
 
-function assembleSuiteCode(chainedTests, suiteSeed, interactiveTests) {
-  // Begin with core imports and initialization code
-  let suiteCode = `
-// Automatically generated CAPTCHA suite
-// Suite ID: ${suiteSeed}
-// Generated: ${new Date().toISOString()}
+/**
+ * Generates the SHA-256 function implementation from shared package
+ * @return {string} JavaScript code for SHA-256 implementation
+ */
+function generateSha256Function() {
+  return `// SHA-256 hashing function
+const sha256 = ${sharedCode.sha256.toString()};`;
+}
 
-// Interactive component classes for pattern generation and UI
-${PatternGenerator.toString()}
-
-${InteractionUI.toString()}
-
-// Test implementation
-const testImplementations = {
-${generateTestFunctions(chainedTests)}
-};
-
-// Interactive test implementations (activated only when needed)
-const interactiveTestImplementations = {
-${interactiveTests.map(test => {
-  // Replace parameter placeholders with actual values
-  let code = test.code;
-  const paramValues = generateTestParams(test, suiteSeed + '_interactive_' + test.id);
-  Object.entries(paramValues).forEach(([key, value]) => {
-    code = code.replace(new RegExp(key, 'g'), JSON.stringify(value));
-  });
-  
-  // Replace function name placeholder
-  const functionName = `interactive_${test.id}`;
-  code = code.replace('TEST_FUNCTION_NAME', functionName);
-  
-  // Add function to the interactive test implementations object
-  return `  "${test.id}": ${code}`;
-}).join(',\n\n')}
-};
-
-// Proof of Work implementation
+/**
+ * Generates the Proof of Work implementation code
+ * @return {string} JavaScript code for PoW implementation
+ */
+function generateProofOfWorkFunction() {
+  return `// Proof of Work implementation
 async function runProofOfWork(challenge) {
   try {
     // Get parameters from the challenge
@@ -616,210 +647,43 @@ async function runProofOfWork(challenge) {
       timestamp: challenge.timestamp
     };
   }
+}`;
 }
 
-// Implementation of SHA-256 for hashing
-async function sha256(message) {
-  // Use SubtleCrypto if available (modern browsers)
-  if (typeof crypto !== 'undefined' && crypto.subtle) {
-    const msgBuffer = new TextEncoder().encode(message);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-  
-  // Pure JS implementation of SHA-256 algorithm
-  // This is a complete implementation matching the standard
-  
-  // Convert string to array of bytes
-  const encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : {
-    encode: (str) => {
-      const bytes = new Uint8Array(str.length);
-      for (let i = 0; i < str.length; i++) {
-        bytes[i] = str.charCodeAt(i) & 0xff;
-      }
-      return bytes;
-    }
-  };
-  
-  const bytes = encoder.encode(message);
-  
-  // SHA-256 constants
-  const K = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
-  ];
-  
-  // Initial hash values (first 32 bits of the fractional parts of the square roots of the first 8 primes)
-  let H = [
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-  ];
-  
-  // Pre-processing: padding the message
-  const bitLength = bytes.length * 8;
-  const paddingLength = (512 - ((bitLength + 8 + 64) % 512)) % 512;
-  
-  // Create padded message (original + 1 + zeros + length as 64-bit BE integer)
-  const paddedLength = Math.ceil((bitLength + 8 + paddingLength + 64) / 8);
-  const padded = new Uint8Array(paddedLength);
-  
-  // Copy original message
-  padded.set(bytes);
-  
-  // Append 1 followed by zeros
-  padded[bytes.length] = 0x80;
-  
-  // Append 64-bit BE integer for original length
-  const lengthBytes = new Uint8Array(8);
-  let tempLength = bitLength;
-  for (let i = 7; i >= 0; i--) {
-    lengthBytes[i] = tempLength & 0xff;
-    tempLength = tempLength >>> 8;
-  }
-  padded.set(lengthBytes, paddedLength - 8);
-  
-  // Process the message in 512-bit chunks
-  for (let i = 0; i < padded.length; i += 64) {
-    const chunk = padded.slice(i, i + 64);
-    
-    // Create message schedule array (64x 32-bit words)
-    const W = new Array(64).fill(0);
-    
-    // Copy chunk into first 16 words of the message schedule array
-    for (let j = 0; j < 16; j++) {
-      W[j] = (chunk[j*4] << 24) | (chunk[j*4+1] << 16) | (chunk[j*4+2] << 8) | chunk[j*4+3];
-    }
-    
-    // Extend the first 16 words into the remaining 48 words
-    for (let j = 16; j < 64; j++) {
-      const s0 = rightRotate(W[j-15], 7) ^ rightRotate(W[j-15], 18) ^ (W[j-15] >>> 3);
-      const s1 = rightRotate(W[j-2], 17) ^ rightRotate(W[j-2], 19) ^ (W[j-2] >>> 10);
-      W[j] = (W[j-16] + s0 + W[j-7] + s1) >>> 0;
-    }
-    
-    // Initialize working variables to current hash value
-    let a = H[0];
-    let b = H[1];
-    let c = H[2];
-    let d = H[3];
-    let e = H[4];
-    let f = H[5];
-    let g = H[6];
-    let h = H[7];
-    
-    // Compression function main loop
-    for (let j = 0; j < 64; j++) {
-      const S1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25);
-      const ch = (e & f) ^ ((~e) & g);
-      const temp1 = (h + S1 + ch + K[j] + W[j]) >>> 0;
-      const S0 = rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22);
-      const maj = (a & b) ^ (a & c) ^ (b & c);
-      const temp2 = (S0 + maj) >>> 0;
-      
-      h = g;
-      g = f;
-      f = e;
-      e = (d + temp1) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (temp1 + temp2) >>> 0;
-    }
-    
-    // Add the compressed chunk to the current hash value
-    H[0] = (H[0] + a) >>> 0;
-    H[1] = (H[1] + b) >>> 0;
-    H[2] = (H[2] + c) >>> 0;
-    H[3] = (H[3] + d) >>> 0;
-    H[4] = (H[4] + e) >>> 0;
-    H[5] = (H[5] + f) >>> 0;
-    H[6] = (H[6] + g) >>> 0;
-    H[7] = (H[7] + h) >>> 0;
-  }
-  
-  // Produce the final hash value (big-endian)
-  const hashResult = H.map(h => h.toString(16).padStart(8, '0')).join('');
-  return hashResult;
-  
-  // Helper function for right rotate
-  function rightRotate(value, bits) {
-    return ((value >>> bits) | (value << (32 - bits))) >>> 0;
-  }
-}
+/**
+ * Assembles the complete suite code from components
+ * @param {Array<Object>} chainedTests - Array of chained tests
+ * @param {string} suiteSeed - Unique seed for this suite
+ * @param {Array<Object>} interactiveTests - Array of interactive tests
+ * @return {string} Complete JavaScript code for the suite
+ */
+function assembleSuiteCode(chainedTests, suiteSeed, interactiveTests) {
+  // Begin with core imports and initialization code
+  let suiteCode = `
+// Automatically generated CAPTCHA suite
+// Suite ID: ${suiteSeed}
+// Generated: ${new Date().toISOString()}
 
-// Test runner that enforces chaining
+// Test implementations
+const testImplementations = {
+${generateTestFunctions(chainedTests)}
+};
+
+// Interactive test implementations
+const interactiveTestImplementations = {
+${generateInteractiveTestFunctions(interactiveTests, suiteSeed)}
+};
+
+${generateProofOfWorkFunction()}
+
+${generateSha256Function()}
+
 ${generateChainedTestRunner(chainedTests)}
-
-// Interactive challenge activator
-async function activateInteractiveChallenge(type, params) {
-  try {
-    // Find an appropriate test based on difficulty level
-    let testId = null;
-    let targetDifficulty = params.difficulty || 5;
-    
-    // Select the closest matching test by difficulty
-    let minDiffDelta = Infinity;
-    for (const id in interactiveTestImplementations) {
-      // Extract difficulty from test ID
-      let testDifficulty = 5; // Default medium difficulty
-      
-      if (id.includes('easy')) {
-        testDifficulty = 2;
-      } else if (id.includes('medium')) {
-        testDifficulty = 5;
-      } else if (id.includes('hard')) {
-        testDifficulty = 8;
-      }
-      
-      const diffDelta = Math.abs(testDifficulty - targetDifficulty);
-      if (diffDelta < minDiffDelta) {
-        minDiffDelta = diffDelta;
-        testId = id;
-      }
-    }
-    
-    // If no appropriate test found, use first available
-    if (!testId && Object.keys(interactiveTestImplementations).length > 0) {
-      testId = Object.keys(interactiveTestImplementations)[0];
-    }
-    
-    // If still no test, return error
-    if (!testId) {
-      throw new Error("No interactive tests available");
-    }
-    
-    // Create a context object for the interactive test
-    const interactiveContext = {
-      challenge: params,
-      startTime: performance.now()
-    };
-    
-    // Run the selected interactive test
-    return await interactiveTestImplementations[testId](interactiveContext);
-  } catch (error) {
-    console.error("Error activating interactive challenge:", error);
-    return {
-      error: "Failed to activate interactive challenge",
-      errorMessage: error.message
-    };
-  }
-}
 
 // Initialize CaptchaSystem with integrated proof of work
 window.CaptchaSystem = {
-  // Make the interactive component classes available to the client
-  interactionClasses: {
-    PatternGenerator,
-    InteractionUI
-  },
   
-  verify: async function(challenge) {
+  startAutoVerify: async function(challenge) {
     console.log("Starting verification for challenge:", challenge.id);
     
     try {
@@ -864,17 +728,16 @@ window.CaptchaSystem = {
   },
   
   // Method to activate interactive challenge when needed
-  runInteractiveChallenge: async function(params) {
+  startInteractiveVerify: async function(challenge) {
     console.log("Starting interactive challenge");
     
     try {
-      const type = params.type || params.challengeType || "pattern_completion";
-      return await activateInteractiveChallenge(type, params);
+      return await runInteractiveTest(challenge);
     } catch (error) {
-      console.error("Interactive challenge failed:", error);
+      console.error("Interactive test failed:", error);
       return {
         success: false,
-        error: error.message || "Unknown interactive challenge error"
+        error: error.message || "Unknown interactive test error"
       };
     }
   }
@@ -917,7 +780,6 @@ function generateUniqueSuite(suiteId, baseSuiteDir) {
       created: new Date().toISOString(),
       suiteSeed: suiteSeed,
       
-      // Only include automatic tests in the tests array (critical for verification)
       tests: chainedTests.map(test => ({
         id: test.id,
         originalId: test.originalId,
@@ -931,11 +793,11 @@ function generateUniqueSuite(suiteId, baseSuiteDir) {
       // Add separate array for interactive tests
       interactiveTests: selectedInteractiveTests.map(test => ({
         id: test.id,
-        originalId: test.id,
-        functionName: `interactive_${test.id}`,
-        isInteractive: true,
+        originalId: test.originalId,
+        functionName: test.functionName,
         difficultyLevel: test.difficultyLevel,
-        paramValues: generateTestParams(test, suiteSeed + '_interactive_' + test.id)
+        paramValues: test.paramValues,
+        isInteractive: true
       }))
     };
 
