@@ -3,8 +3,8 @@ const path = require('path');
 const crypto = require('crypto');
 const sharedCode = require('@sdpalmer79/captcha-shared-code');
 
-const MIN_TESTS = parseEnvNumber(process.env.MIN_TESTS, 1);
-const MIN_INTERACTIVE_TESTS = parseEnvNumber(process.env.MIN_INTERACTIVE_TESTS, 1); 
+const MIN_TESTS = parseEnvNumber(process.env.MIN_TESTS, 8);
+const MIN_INTERACTIVE_TESTS = parseEnvNumber(process.env.MIN_INTERACTIVE_TESTS, 3); 
 
 function parseEnvNumber(value, defaultValue) {
   if (value === undefined || value === null || value === '') {

@@ -39,32 +39,54 @@ function createChallengeForRequest(suiteData, request) {
 /**
  * Creates an interactive challenge configuration based on the automatic test results
  * @param {Object} challenge - Original challenge data
+ * @param {Object} suiteData - Test suite data
  * @param {number} botProbability - Bot probability assessment from automatic tests
  * @returns {Object} Interactive challenge configuration
  */
 function createInteractiveChallenge(challenge, suiteData, botProbability) {
-  // Calculate difficulty level based on bot probability (1-10 scale)
-  // Higher bot probability = harder challenge
-  
   // Select appropriate interactive test based on bot probability
   const selectedTest = selectInteractiveTest(botProbability, suiteData);
   
-  // Create the interactive challenge configuration
-  // TODO Create interactive challenge id when saving to db
+  // Generate a deterministic but unique seed for this interactive challenge
+  // Combining parent challenge ID with timestamp ensures uniqueness while remaining deterministic
   const interactiveChallengeId = uuidv4();
+  const interactiveSeed = generateInteractiveSeed(challenge.id, interactiveChallengeId, selectedTest);
+  
+  // Create the interactive challenge configuration
   const interactiveChallenge = {
     id: interactiveChallengeId,
     parentChallengeId: challenge.id,
     timestamp: Date.now(),
     expiry: Date.now() + MAX_INTERACTIVE_CHALLENGE_AGE,
     
-    // Parameters used by the client to render the appropriate challenge
+    // Add seed to parameters for client rendering
     parameters: {
-      test: selectedTest // Use the full function name as the type
+      test: selectedTest,
+      seed: interactiveSeed,
+      difficulty: Math.min(Math.floor(probability * 10) + 1, 10)
     }
   };
   
   return interactiveChallenge;
+}
+
+/**
+ * Generates a deterministic seed for interactive challenges
+ * @param {string} parentId - Parent challenge ID
+ * @param {string} interactiveId - Interactive challenge ID
+ * @param {string} testType - Type of interactive test
+ * @returns {string} - Deterministic seed string
+ */
+function generateInteractiveSeed(parentId, interactiveId, testType) {
+  // Use the first 8 chars of both IDs + test type to ensure uniqueness
+  const seedBase = `${parentId.substring(0, 8)}-${interactiveId.substring(0, 8)}-${testType}`;
+  
+  // Create a deterministic hash of this string
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(seedBase).digest('hex');
+  
+  // Return a portion of the hash as the seed
+  return hash.substring(0, 16);
 }
 
 /**
