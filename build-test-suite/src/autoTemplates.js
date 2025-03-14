@@ -6,7 +6,7 @@ const tokenTests = {
     {
       id: "token_verification",
       description: "Performs verification of the challenge token",
-      code: `async function TEST_FUNCTION_NAME(ctx) {{
+      code: `async function TEST_FUNCTION_NAME(ctx) {
         try {
           ${sharedCode.token_verification.calculateTokenHash.toString()}
 
