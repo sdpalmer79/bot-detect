@@ -159,7 +159,7 @@
         
         try {
           // Run verification tests - this doesn't make the API call yet
-          const verificationResults = await window.CaptchaSystem.verify(challenge);
+          const verificationResults = await window.CaptchaSystem.startAutoVerify(challenge);
           console.log("Verification results:", verificationResults);
           
           // Check if we got valid results back
@@ -177,7 +177,8 @@
           if (verification.requiresInteractiveChallenge && verification.interactiveChallenge) {
             // Handle interactive challenge
             updateStatus("Additional verification required...");
-            const interactiveResult = await handleInteractiveChallenge(verification.interactiveChallenge);
+            const { interactiveChallenge } = verification;
+            const interactiveResult = await window.CaptchaSystem.startInteractiveVerify(challenge, interactiveChallenge, verificationResults);
             
             // Submit interactive challenge results
             const finalVerification = await submitInteractiveCaptchaResults(
@@ -410,12 +411,6 @@
           reject(error);
         }
       });
-    }
-    
-    // This function is no longer needed as challenges are included in the main CAPTCHA suite
-    // Keeping it as a no-op function in case it's called elsewhere
-    function loadInteractiveChallengeModule(challengeType) {
-      return Promise.resolve();
     }
     
     // Submit interactive challenge results

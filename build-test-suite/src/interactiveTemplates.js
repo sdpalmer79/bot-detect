@@ -24,7 +24,7 @@ const numberSequenceCompletionTests = {
         try {
           // Get challenge parameters
           const seed = ctx.challenge.parameters.seed;
-          const transformSeed = SUITE_TRANSFORM_SEED;
+          const transformSeed = PARAM_TRANSFORM_SEED;
           const difficulty = ctx.challenge.parameters.difficulty; 
 
           // Get the container element from the document
@@ -360,8 +360,8 @@ const numberSequenceCompletionTests = {
         }
       }`,
       paramRanges: {
-        "PARAM_DISTORTION": { min: 1, max: 3, step: 1 },
-        "PARAM_TRANSFORM_SEED": "SUITE_TRANSFORM_SEED"
+        PARAM_DISTORTION: { min: 1, max: 3, step: 1 },
+        PARAM_TRANSFORM_SEED: "SUITE_TRANSFORM_SEED"
       }
     }
   ]

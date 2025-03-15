@@ -62,6 +62,33 @@ function loadInteractiveTemplates() {
 }
 
 /**
+ * Performs a deterministic Fisher-Yates shuffle using a seed
+ * @param {Array} array - The array to shuffle
+ * @param {string|number} seed - Seed for the random number generator
+ * @return {Array} - New shuffled array
+ */
+function shuffleArray(array, seed) {
+  // Convert seed to a usable numeric value if it's a string
+  const seedInt = typeof seed === 'string' 
+    ? parseInt(seed.substring(0, 8), 16) 
+    : Math.abs(seed);
+  
+  // Create seeded RNG
+  const rng = new PseudoRandom(seedInt);
+  
+  // Create copy of original array
+  const shuffled = [...array];
+  
+  // Fisher-Yates algorithm
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng.next() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  
+  return shuffled;
+}
+
+/**
  * Selects multiple tests from a category
  * @param {Object} templates - Test templates
  * @param {string} category - Category name (e.g., 'timingTests')
@@ -448,7 +475,7 @@ function createTestChain(testOrder, seed) {
     const uniqueId = `test_${crypto.createHash('sha256').update(seed + i).digest('hex').substring(0, 8)}`;
     
     // Create a unique name for this test function
-    const functionName = `run_${uniqueId}`;
+    const functionName = `auto_${uniqueId}`;
     
     // Store the relationship between this test and previous test for chaining
     chainedTests.push({
@@ -484,43 +511,12 @@ function generateTestFunctions(chainedTests) {
 }
 
 /**
- * Generates code for interactive test implementations
- * @param {Array<Object>} interactiveTests - Array of interactive test objects
- * @param {string} suiteSeed - Unique seed for this suite
- * @return {string} - Generated JavaScript code for interactive tests
- */
-function generateInteractiveTestFunctions(interactiveTests, suiteSeed) {
-  return interactiveTests.map(test => {
-    // Replace parameter placeholders with actual values
-    let code = test.code;
-    const paramValues = generateTestParams(test, suiteSeed + '_interactive_' + test.id);
-    Object.entries(paramValues).forEach(([key, value]) => {
-      code = code.replace(new RegExp(key, 'g'), JSON.stringify(value));
-    });
-    
-    // Replace function name placeholder
-    const functionName = `interactive_${test.id}`;
-    code = code.replace('TEST_FUNCTION_NAME', functionName);
-    
-    // Add function to the interactive test implementations object
-    return `  "${test.id}": ${code}`;
-  }).join(',\n\n');
-}
-
-/**
  * Generates code for executing tests in a chain, with centralized result hashing
  * @param {Array<Object>} chainedTests - Array of chained tests
  * @return {string} - Generated JavaScript code for test execution chain
  */
 function generateTestExecutionChain(chainedTests) {
-  // First add the hashTestResult function that will be used by all tests
-  const hashingFunction = `
-  // Centralized test result hashing function
-  async function hashTestResult(testResult, previousHash, testId) {
-    const resultStr = JSON.stringify(testResult, Object.keys(testResult).sort()) + previousHash;
-    return await sha256(resultStr);
-  }`;
-
+  
   // Generate test execution code
   const executionCode = chainedTests.map(test => `
   // Execute test: ${test.originalId} (${test.id})
@@ -533,8 +529,7 @@ function generateTestExecutionChain(chainedTests) {
   console.log("Updated hash: " + previousHash.substring(0, 8) + "...");
   `).join('\n');
   
-  // Combine the hashing function and execution code
-  return hashingFunction + '\n' + executionCode;
+  return executionCode;
 }
 
 /** 
@@ -573,6 +568,11 @@ async function runChainedTests(testContext) {
 function generateSha256Function() {
   return `// SHA-256 hashing function
 const sha256 = ${sharedCode.sha256.toString()};`;
+}
+
+function generateHashResultsFunction() {
+  return `// Centralized test result hashing function
+const hashTestResult = ${sharedCode.chainHashObject.toString()};`;
 }
 
 /**
@@ -664,19 +664,16 @@ function assembleSuiteCode(chainedTests, suiteSeed, interactiveTests) {
 // Suite ID: ${suiteSeed}
 // Generated: ${new Date().toISOString()}
 
-// Test implementations
-const testImplementations = {
-${generateTestFunctions(chainedTests)}
-};
-
-// Interactive test implementations
-const interactiveTestImplementations = {
-${generateInteractiveTestFunctions(interactiveTests, suiteSeed)}
-};
-
 ${generateProofOfWorkFunction()}
 
 ${generateSha256Function()}
+
+${generateHashResultsFunction()}
+
+// Test implementations
+const testImplementations = {
+${generateTestFunctions(shuffleArray([...chainedTests, ...interactiveTests], suiteSeed))}
+};
 
 ${generateChainedTestRunner(chainedTests)}
 
@@ -728,11 +725,12 @@ window.CaptchaSystem = {
   },
   
   // Method to activate interactive challenge when needed
-  startInteractiveVerify: async function(challenge) {
+  startInteractiveVerify: async function(challenge, interactiveChallenge, autoVerificationResults) {
     console.log("Starting interactive challenge");
     
     try {
-      return await runInteractiveTest(challenge);
+      const result = await runInteractiveTest(challenge);
+
     } catch (error) {
       console.error("Interactive test failed:", error);
       return {
