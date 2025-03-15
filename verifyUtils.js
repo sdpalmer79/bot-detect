@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const sharedCode = require('@sdpalmer79/captcha-shared-code');
 
 /**
  * Evaluates token verification test results
@@ -33,16 +34,16 @@ async function evaluateTokenVerification(result, challenge, suiteData) {
     const test = suiteData.tests.find(test => test.originalId === 'token_verification');
     const transformSeed = test.paramValues['PARAM_TRANSFORM_SEED'];
     
-    // Calculate expected tokenHash using server-side implementation
-    const expectedHash = await calculateClientCompatibleHash(
+    // Calculate expected tokenHash
+    const { tokenHash } = await sharedCode.token_verification.calculateTokenHash(
       token, 
       challengeId, 
       timestamp, 
       transformSeed
     );
-    
+
     // Compare with received hash
-    const hashValid = (result.tokenHash === expectedHash.substring(0, 16));
+    const hashValid = (result.tokenHash === tokenHash);
     
     // Check timing for anomalies
     const executionTime = result.duration;

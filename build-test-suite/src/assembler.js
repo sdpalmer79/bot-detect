@@ -355,7 +355,7 @@ function selectInteractiveTests(seed, templates) {
       const selectedTest = testsForDifficultyLevel[selectedIndex];
       
       // Add the selected test to the final list
-      const uniqueId = `test_${crypto.createHash('sha256').update(seed + selectedIndex).digest('hex').substring(0, 8)}`;
+      const uniqueId = `test_${crypto.createHash('sha256').update(selectedTest.id + seed + selectedIndex).digest('hex').substring(0, 8)}`;
     
       // Create a unique name for this test function
       const functionName = `interactive_${uniqueId}`;
@@ -472,7 +472,7 @@ function createTestChain(testOrder, seed) {
   
   for (let i = 0; i < testOrder.length; i++) {
     const test = testOrder[i];
-    const uniqueId = `test_${crypto.createHash('sha256').update(seed + i).digest('hex').substring(0, 8)}`;
+    const uniqueId = `test_${crypto.createHash('sha256').update(test.id + seed + i).digest('hex').substring(0, 8)}`;
     
     // Create a unique name for this test function
     const functionName = `auto_${uniqueId}`;

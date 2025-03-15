@@ -20,18 +20,17 @@ const tokenTests = {
           
           // DEBUG: Log input parameters
           console.log('=== TOKEN VERIFICATION DEBUG ===');
-          console.log(\`token: \${token} challengeId: \${challengeId} timestamp: \${timestamp} seed: \${TRANSFORM_SEED}\`);
+          console.log(\`token: \${token} challengeId: \${challengeId} timestamp: \${timestamp} seed: \${transformSeed}\`);
           
           // Start time measurement
           const startTime = performance.now();
           
           // Calculate hash
-          const result = calculateTokenHash(token, challengeId, timestamp, transformSeed)
+          const result = await calculateTokenHash(token, challengeId, timestamp, transformSeed)
           
           // Calculate completion time
           const duration = performance.now() - startTime;
-          console.log(\`Final hash: \${digest}\`);
-          console.log(\`Returning tokenHash: \${digest.substring(0, 16)}\`);
+          console.log(\`Returning tokenHash: \${result.tokenHash}\`);
           
           // Return verification result
           return {

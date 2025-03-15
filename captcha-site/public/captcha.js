@@ -148,7 +148,7 @@
         await loadCaptchaSuite(challenge.suiteUrl);
         
         // Check if CaptchaSystem was defined by the loaded script
-        if (!window.CaptchaSystem || !window.CaptchaSystem.verify) {
+        if (!window.CaptchaSystem || !window.CaptchaSystem.startInteractiveVerify) {
           console.error("CaptchaSystem not found or verify method not available");
           showError("Verification system failed to load properly.");
           return;
