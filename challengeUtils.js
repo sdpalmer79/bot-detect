@@ -95,8 +95,8 @@ function generateInteractiveSeed(parentId, interactiveId, testType) {
  * @returns {string} Function name of selected interactive test
  */
 function selectInteractiveTest(botProbability, suiteData) {
-  // Convert bot probability to difficulty level (1-10 scale)
-  const targetDifficulty = Math.min(Math.floor(botProbability * 10) + 1, 10);
+  // Convert bot probability to difficulty level (1-5 scale)
+  const targetDifficulty = Math.min(Math.floor(botProbability * 10) + 1, 5);
   let test;
 
   // Select test by difficulty level

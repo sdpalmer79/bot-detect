@@ -455,8 +455,14 @@ function generateTestParams(test, seed, suiteParams = {}) {
       // If the parameter is just a single number, use it directly
       paramValues[paramName] = range;
     } else if (typeof range === 'string') {
-      // String constant
-      paramValues[paramName] = range;
+      // Handle self-reference to the test's own properties
+      if (range.startsWith('SELF.')) {
+        const property = range.split('.')[1];
+        paramValues[paramName] = test[property];
+      } else {
+        // String constant
+        paramValues[paramName] = range;
+      }
     } else {
       // Default case - generate a random number between 0-999
       paramValues[paramName] = Math.floor(rng.next() * 1000);

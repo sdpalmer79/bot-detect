@@ -10,7 +10,7 @@
     "start": "node debugScript.js"
   },
   "dependencies": {
-    "@sdpalmer79/captcha-shared-code": "^1.0.4",
+    "@sdpalmer79/captcha-shared-code": "^1.0.6",
     "javascript-obfuscator": "^4.1.1",
     "jquery": "^3.6.0",
     "terser": "^5.39.0",

@@ -14,18 +14,17 @@ const numberSequenceCompletionTests = {
   description: "Number sequence completion tests",
   variations: [
     {
-      id: "number_sequence_completion_easy",
-      difficultyLevel: 3, // Easy difficulty
-      description: "Easy number sequence completion challenge",
+      id: "number_sequence_completion_level1",
+      difficultyLevel: 1,
+      description: "Number sequence completion challenge",
       code: `async function TEST_FUNCTION_NAME(ctx) {
         
-        ${sharedCode.number_sequence_completion_easy.deriveSequenceParams.toString()}
+        ${sharedCode.number_sequence_completion.deriveSequenceParams.toString()}
         
         try {
           // Get challenge parameters
           const seed = ctx.challenge.parameters.seed;
           const transformSeed = PARAM_TRANSFORM_SEED;
-          const difficulty = ctx.challenge.parameters.difficulty; 
 
           // Get the container element from the document
           const container = document.getElementById('captcha-graphic');
@@ -51,7 +50,7 @@ const numberSequenceCompletionTests = {
           };
           
           // Generate sequence parameters deterministically from seed
-          const sequenceParams = deriveSequenceParams(seed, transformSeed, difficulty);
+          const sequenceParams = deriveSequenceParams(seed, transformSeed, DIFFICULTY_LEVEL);
           const { sequence, options } = sequenceParams;
           
           // Create styled container for the challenge
@@ -360,8 +359,8 @@ const numberSequenceCompletionTests = {
         }
       }`,
       paramRanges: {
-        PARAM_DISTORTION: { min: 1, max: 3, step: 1 },
-        PARAM_TRANSFORM_SEED: "SUITE_TRANSFORM_SEED"
+        PARAM_TRANSFORM_SEED: "SUITE_TRANSFORM_SEED",
+        DIFFICULTY_LEVEL: "SELF.difficultyLevel"
       }
     }
   ]
