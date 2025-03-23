@@ -242,11 +242,7 @@ module.exports = {
    */
   getParameterDefinitions() {
     return {
-      "PARAM_TRANSFORM_SEED": {
-        type: "string",
-        source: "SUITE_TRANSFORM_SEED",
-        description: "Transformation seed for token verification"
-      }
+      "PARAM_TRANSFORM_SEED": "SUITE_TRANSFORM_SEED"
     };
   },
   

@@ -12,7 +12,7 @@ const fs = require('fs');
 const { createCanvas, registerFont } = require('canvas');
 const os = require('os');
 
-// Set up fonts directory - look for fonts in both system and local locations
+// Set up fonts directory - look for fonts in local location
 const fontsDir = path.join(__dirname, 'fonts');
 if (fs.existsSync(fontsDir)) {
   // Register custom fonts if available
@@ -53,13 +53,51 @@ function generateSequenceImage(sequenceValues, distortionParams, challengeId, op
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
   
-  // Choose fonts based on difficulty
-  const baseFonts = ['Arial', 'Helvetica', 'Tahoma'];
-  let availableFonts = [...baseFonts];
+  // Add a function to test if a font is available
+  function isFontAvailable(fontFamily) {
+    try {
+      // Try to use the font in a simple measurement
+      const testCanvas = createCanvas(10, 10);
+      const testContext = testCanvas.getContext('2d');
+      testContext.font = `12px "${fontFamily}"`;
+      testContext.measureText('test');
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
   
-  if (distortionParams.fontVariation) {
-    // Add more varied fonts if available
-    availableFonts = availableFonts.concat(['Georgia', 'Verdana', 'Impact', 'Times New Roman']);
+  // Use the bundled fonts in for rendering
+  let availableFonts = fontFiles.map(font => path.basename(font, '.ttf'));
+
+  // No bundled fonts - Attempt to build a list of available fonts
+  if (availableFonts.length === 0) {
+    const systemFontFallbacks = [
+        'sans-serif',       // Should be available everywhere
+        'monospace',        // Should be available everywhere
+        'serif'             // Should be available everywhere
+    ];
+    availableFonts = [...systemFontFallbacks]; // Start with guaranteed fonts
+
+    // Test common fonts that might be available
+    const commonFonts = ['Arial', 'Helvetica', 'Tahoma', 'Georgia', 'Verdana', 'Liberation Sans'];
+    commonFonts.forEach(font => {
+        if (isFontAvailable(font)) {
+        availableFonts.push(font);
+     }
+    });
+  }
+  
+  // For font variation at higher difficulties, we'll need a larger selection
+  // but will still rely on the fonts we've confirmed are available
+  if (distortionParams.fontVariation && availableFonts.length > 3) {
+    // We have enough fonts for variation - good
+  } else if (distortionParams.fontVariation) {
+    // Not enough fonts, add some variations of existing ones
+    availableFonts = availableFonts.concat(
+      availableFonts.map(font => `${font} bold`),
+      availableFonts.map(font => `${font} italic`)
+    );
   }
   
   // Generate background noise if needed
@@ -222,7 +260,6 @@ function generateSequenceImage(sequenceValues, distortionParams, challengeId, op
   };
 }
 
-// Update generateChallengeParams to use the image generation
 module.exports = {
   meta: {
     id: "number_sequence",
@@ -238,11 +275,23 @@ module.exports = {
    * @returns {string} JavaScript code with parameter placeholders
    */
   getClientCode(seed) {
-    // TODO: Implement - return code that:
-    // 1. Displays the server-generated sequence image to the user
-    // 2. Provides UI for collecting user's answer
-    // 3. Handles submission and feedback
-    throw new Error('getClientCode not yet implemented');
+    // Select variation based on seed if provided
+    if (!seed) {
+      seed = Date.now().toString();
+    }
+    
+    // Create a numeric hash of the seed
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+      hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+      hash |= 0; // Convert to 32-bit integer
+    }
+    
+    // Select variation using the hash
+    const variations = this.getVariations();
+    const index = Math.abs(hash) % variations.length;
+    
+    return variations[index].code;
   },
 
   /**
@@ -250,11 +299,245 @@ module.exports = {
    * @returns {Array} Array of available UI test variations
    */
   getVariations() {
-    // TODO: Implement - define UI variations for:
-    // 1. Standard input field for number
-    // 2. Multiple choice selection
-    // 3. Touch/click interface for mobile
-    throw new Error('getVariations not yet implemented');
+    return [
+      {
+        id: "number_sequence_standard",
+        description: "Standard input field for entering the next number in sequence",
+        code: `async function TEST_FUNCTION_NAME(ctx) {
+          try {
+            // Extract parameters from context
+            const challenge = ctx.challenge || {};
+            const testParams = ctx.testParams || {};
+            
+            // Track behavioral data for bot detection
+            const behavioralData = {
+              mouseMovements: [],
+              keyPressTimings: [],
+              focusEvents: [],
+              totalInteractionTime: 0,
+              inputCorrections: 0,
+              startTime: Date.now()
+            };
+            
+            // Track mouse movements
+            const trackMouseMovement = (e) => {
+              behavioralData.mouseMovements.push({
+                x: e.clientX,
+                y: e.clientY,
+                timestamp: Date.now()
+              });
+            };
+            
+            // Create container element
+            const container = document.createElement('div');
+            container.className = 'sequence-challenge-container';
+            container.style.cssText = 'width: 100%; max-width: 500px; margin: 0 auto; padding: 20px; font-family: sans-serif; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); background: #fff;';
+            
+            // Add title
+            const title = document.createElement('h2');
+            title.textContent = 'Number Sequence Challenge';
+            title.style.cssText = 'margin-top: 0; color: #333; font-size: 18px;';
+            container.appendChild(title);
+            
+            // Add instructions
+            const instructions = document.createElement('p');
+            instructions.textContent = 'Look at the sequence of numbers below and determine what number should come next.';
+            instructions.style.cssText = 'margin-bottom: 20px; color: #555; font-size: 14px;';
+            container.appendChild(instructions);
+            
+            // Create image container
+            const imageContainer = document.createElement('div');
+            imageContainer.style.cssText = 'width: 100%; text-align: center; margin-bottom: 25px; border: 1px solid #eee; padding: 10px; border-radius: 4px; background: #f9f9f9;';
+            
+            // Create and add the sequence image
+            const sequenceImage = document.createElement('img');
+            sequenceImage.src = "{{PARAM_IMAGE_BASE_URL}}" + challenge.imageUrl;
+            sequenceImage.alt = 'Number sequence puzzle';
+            sequenceImage.style.cssText = 'max-width: 100%; height: auto; display: inline-block;';
+            imageContainer.appendChild(sequenceImage);
+            container.appendChild(imageContainer);
+            
+            // Create input area
+            const inputArea = document.createElement('div');
+            inputArea.style.cssText = 'margin: 20px 0; display: flex; flex-direction: column; align-items: center;';
+            
+            const inputLabel = document.createElement('label');
+            inputLabel.htmlFor = 'sequence-answer';
+            inputLabel.textContent = 'What number comes next in the sequence?';
+            inputLabel.style.cssText = 'margin-bottom: 10px; font-weight: bold; color: #333;';
+            inputArea.appendChild(inputLabel);
+            
+            // Create input group (input + button)
+            const inputGroup = document.createElement('div');
+            inputGroup.style.cssText = 'display: flex; width: 100%; max-width: 300px; margin: 0 auto;';
+            
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.id = 'sequence-answer';
+            input.placeholder = 'Enter number';
+            input.style.cssText = 'flex: 1; padding: 10px 15px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px 0 0 4px; outline: none;';
+            
+            const submitButton = document.createElement('button');
+            submitButton.textContent = 'Submit';
+            submitButton.style.cssText = 'padding: 10px 20px; background: #3366cc; color: white; border: none; border-radius: 0 4px 4px 0; cursor: pointer; font-weight: bold;';
+            submitButton.disabled = true;
+            
+            // Add input event tracking for bot detection
+            input.addEventListener('keydown', (e) => {
+              behavioralData.keyPressTimings.push({
+                key: e.key,
+                keyCode: e.keyCode,
+                timestamp: Date.now(),
+                type: 'keydown'
+              });
+            });
+            
+            input.addEventListener('input', (e) => {
+              // Enable submit button if we have an answer
+              submitButton.disabled = !e.target.value;
+              
+              // Track input changes
+              if (e.target.value.length > 0 && e.inputType === 'deleteContentBackward') {
+                behavioralData.inputCorrections++;
+              }
+            });
+            
+            // Track focus events
+            input.addEventListener('focus', () => {
+              behavioralData.focusEvents.push({
+                type: 'focus',
+                timestamp: Date.now()
+              });
+            });
+            
+            input.addEventListener('blur', () => {
+              behavioralData.focusEvents.push({
+                type: 'blur',
+                timestamp: Date.now()
+              });
+            });
+            
+            inputGroup.appendChild(input);
+            inputGroup.appendChild(submitButton);
+            inputArea.appendChild(inputGroup);
+            
+            // Add status message area
+            const statusMessage = document.createElement('div');
+            statusMessage.style.cssText = 'margin-top: 15px; min-height: 20px; text-align: center;';
+            inputArea.appendChild(statusMessage);
+            
+            container.appendChild(inputArea);
+            
+            // Create timer display (for challenge timeout)
+            const timerDisplay = document.createElement('div');
+            timerDisplay.style.cssText = 'text-align: center; color: #777; font-size: 14px; margin-top: 10px;';
+            timerDisplay.textContent = 'Time remaining: ' + Math.floor(testParams.PARAM_CHALLENGE_TIMEOUT / 1000) + ' seconds';
+            container.appendChild(timerDisplay);
+            
+            // Start tracking mouse movements throughout the container
+            container.addEventListener('mousemove', trackMouseMovement);
+            
+            // Attach to DOM
+            const challengeContainer = document.getElementById(ctx.containerId);
+            if (challengeContainer) {
+              challengeContainer.appendChild(container);
+              
+              // Auto-focus the input field after a short delay
+              setTimeout(() => {
+                input.focus();
+              }, 300);
+            }
+            
+            // Setup timer countdown
+            const startTime = Date.now();
+            const timeoutMs = {{PARAM_CHALLENGE_TIMEOUT}};
+            
+            const timerInterval = setInterval(() => {
+              const elapsed = Date.now() - startTime;
+              const remaining = Math.max(0, timeoutMs - elapsed);
+              const secondsRemaining = Math.ceil(remaining / 1000);
+              
+              timerDisplay.textContent = 'Time remaining: ' + secondsRemaining + ' seconds';
+              
+              if (remaining <= 0) {
+                clearInterval(timerInterval);
+                timerDisplay.textContent = 'Time expired!';
+                timerDisplay.style.color = '#cc0000';
+                input.disabled = true;
+                submitButton.disabled = true;
+                
+                statusMessage.textContent = 'You ran out of time. Please try again.';
+                statusMessage.style.color = '#cc0000';
+                
+                // Return timeout result
+                resolve({
+                  success: false,
+                  reason: 'timeout',
+                  userAnswer: input.value || null,
+                  behavioralData
+                });
+              }
+            }, 1000);
+            
+            return new Promise((resolve) => {
+              // Handle submission
+              submitButton.addEventListener('click', () => {
+                // Stop timer
+                clearInterval(timerInterval);
+                
+                // Get user's answer
+                const userAnswer = parseInt(input.value, 10);
+                
+                // Calculate completion time
+                behavioralData.totalInteractionTime = Date.now() - behavioralData.startTime;
+                
+                // Sample mouse movement data if too large (keep at most 100 points)
+                if (behavioralData.mouseMovements.length > 100) {
+                  const samplingFactor = Math.floor(behavioralData.mouseMovements.length / 100);
+                  behavioralData.mouseMovements = behavioralData.mouseMovements.filter((_, i) => i % samplingFactor === 0);
+                }
+                
+                // Calculate mouse movement entropy (measure of randomness/humanity)
+                let entropy = 0;
+                if (behavioralData.mouseMovements.length > 5) {
+                  // Calculate distances between consecutive points
+                  const distances = [];
+                  for (let i = 1; i < behavioralData.mouseMovements.length; i++) {
+                    const prev = behavioralData.mouseMovements[i-1];
+                    const curr = behavioralData.mouseMovements[i];
+                    const distance = Math.sqrt(
+                      Math.pow(curr.x - prev.x, 2) + 
+                      Math.pow(curr.y - prev.y, 2)
+                    );
+                    distances.push(distance);
+                  }
+                  
+                  // Calculate standard deviation of distances as a simple entropy measure
+                  const mean = distances.reduce((sum, val) => sum + val, 0) / distances.length;
+                  const variance = distances.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / distances.length;
+                  entropy = Math.sqrt(variance);
+                }
+                
+                behavioralData.mouseEntropyScore = entropy;
+                
+                // Return the result
+                resolve({
+                  userAnswer,
+                  success: true,
+                  behavioralData
+                });
+              });
+            });
+          } catch (error) {
+            console.error('Error in number sequence challenge:', error);
+            return {
+              success: false,
+              error: error.message
+            };
+          }
+        }`
+      }
+    ];
   },
 
   /**
@@ -262,34 +545,16 @@ module.exports = {
    * @returns {Object} Parameter definitions with possible ranges/defaults
    */
   getParameterDefinitions() {
-    // TODO: Implement parameters required for number sequence test
     return {
-      // Base URL for loading sequence images
-      "PARAM_IMAGE_BASE_URL": {
-        type: "string",
-        source: "SUITE_CONFIG",
-        description: "Base URL for sequence challenge images",
-        default: "/challenge-images"
-      },
+      // Parameter for image URL prefix
+      "PARAM_IMAGE_BASE_URL": "", // Empty string default - will be set during suite generation
       
-      // Challenge timeout in milliseconds
+      // Challenge timeout in milliseconds - can be a range or fixed value
       "PARAM_CHALLENGE_TIMEOUT": {
-        type: "number",
-        source: "SUITE_CONFIG",
-        description: "Time allowed to complete the challenge in milliseconds",
-        default: 30000,
         min: 10000,
-        max: 120000
-      },
-
-      // Maximum attempts allowed
-      "PARAM_MAX_ATTEMPTS": {
-        type: "number",
-        source: "SUITE_CONFIG",
-        description: "Maximum number of attempts allowed",
-        default: 3,
-        min: 1,
-        max: 5
+        max: 120000,
+        step: 1000,
+        default: 30000
       }
     };
   },
@@ -501,7 +766,7 @@ module.exports = {
       }
     }
     
-    // NEW CODE: Generate the sequence image
+    // Generate the sequence image
     const imageInfo = generateSequenceImage(
       sequenceValues,
       distortionParams,
@@ -547,17 +812,262 @@ module.exports = {
    * @returns {Object} Verification result with standardized format
    */
   verifyResult(result, challenge, testParams) {
-    // TODO: Implement verification logic against server-generated answer
-    // This will compare the user's submitted answer with the correct next number
-    
-    // Placeholder implementation
-    return {
-      valid: false,
-      botProbability: 0.5,
-      confidence: 0.5,
-      details: {
-        message: "Verification not yet implemented"
+    try {
+      // Check for basic errors or timeouts
+      if (!result || result.error) {
+        return {
+          valid: false,
+          botProbability: 0.7,
+          confidence: 0.8,
+          details: {
+            error: result?.error || 'Invalid test result',
+            message: 'Test returned an error or invalid result'
+          }
+        };
       }
-    };
+  
+      if (result.reason === 'timeout') {
+        return {
+          valid: false,
+          botProbability: 0.4, // Timeouts can happen to humans too
+          confidence: 0.6,
+          details: {
+            message: 'Challenge timed out'
+          }
+        };
+      }
+  
+      // Access verification data from the challenge
+      const verificationData = challenge.verificationData;
+      if (!verificationData || !verificationData.correctAnswer) {
+        return {
+          valid: false,
+          botProbability: 0.5,
+          confidence: 0.5,
+          details: {
+            message: 'Missing verification data'
+          }
+        };
+      }
+  
+      // Initialize scoring
+      let botProbability = 0.1; // Start with low probability
+      let confidence = 0.7;
+      const anomalies = [];
+  
+      // 1. Verify answer correctness
+      const userAnswer = result.userAnswer;
+      const correctAnswer = verificationData.correctAnswer;
+      const answerCorrect = (userAnswer === correctAnswer);
+  
+      // If answer is incorrect, increase bot probability
+      if (!answerCorrect) {
+        botProbability += 0.4;
+        anomalies.push('incorrect_answer');
+      }
+  
+      // Extract behavioral data for analysis
+      const behavioralData = result.behavioralData || {};
+      const { 
+        mouseMovements = [], 
+        keyPressTimings = [], 
+        focusEvents = [], 
+        totalInteractionTime = 0,
+        inputCorrections = 0,
+        mouseEntropyScore = 0
+      } = behavioralData;
+  
+      // 2. Analyze mouse movements
+      // Check if there are any mouse movements (bots often don't move the mouse)
+      if (mouseMovements.length === 0) {
+        botProbability += 0.3;
+        anomalies.push('no_mouse_movement');
+        confidence = Math.min(confidence + 0.1, 0.95);
+      } else {
+        // Check mouse entropy (measure of randomness/humanity)
+        if (mouseEntropyScore < 2) {
+          // Low entropy suggests mechanical/programmatic movement
+          botProbability += 0.2;
+          anomalies.push('low_mouse_entropy');
+        }
+        
+        // Check for unnatural movement patterns (perfectly straight lines)
+        let straightLineCount = 0;
+        for (let i = 2; i < mouseMovements.length; i++) {
+          // Check if three consecutive points form a straight line
+          const p1 = mouseMovements[i-2];
+          const p2 = mouseMovements[i-1];
+          const p3 = mouseMovements[i];
+          
+          // Calculate slopes between points
+          const slope1 = p2.x !== p1.x ? (p2.y - p1.y) / (p2.x - p1.x) : Infinity;
+          const slope2 = p3.x !== p2.x ? (p3.y - p2.y) / (p3.x - p2.x) : Infinity;
+          
+          // If slopes are nearly identical, it's suspiciously straight
+          if (Math.abs(slope1 - slope2) < 0.01) {
+            straightLineCount++;
+          }
+        }
+        
+        // If more than 70% of movement segments are straight lines, it's suspicious
+        if (mouseMovements.length > 10 && 
+            (straightLineCount / (mouseMovements.length - 2)) > 0.7) {
+          botProbability += 0.3;
+          anomalies.push('unnatural_mouse_movement');
+        }
+      }
+  
+      // 3. Analyze keyboard patterns
+      if (keyPressTimings.length === 0) {
+        // No keyboard events recorded - suspicious for numeric input
+        botProbability += 0.2;
+        anomalies.push('no_keyboard_events');
+      } else {
+        // Check for suspiciously consistent timing between keystrokes
+        const keyIntervals = [];
+        let tooConsistent = false;
+        
+        for (let i = 1; i < keyPressTimings.length; i++) {
+          keyIntervals.push(keyPressTimings[i].timestamp - keyPressTimings[i-1].timestamp);
+        }
+        
+        if (keyIntervals.length > 3) {
+          // Calculate standard deviation of intervals
+          const mean = keyIntervals.reduce((sum, val) => sum + val, 0) / keyIntervals.length;
+          const variance = keyIntervals.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / keyIntervals.length;
+          const stdDev = Math.sqrt(variance);
+          
+          // If standard deviation is very low compared to mean, timing is suspiciously consistent
+          if (stdDev < (mean * 0.1)) {
+            botProbability += 0.3;
+            anomalies.push('suspiciously_consistent_typing');
+            tooConsistent = true;
+          }
+        }
+        
+        // Check for inhuman rapid input
+        if (keyIntervals.length > 0) {
+          const minInterval = Math.min(...keyIntervals);
+          if (minInterval < 10) { // Less than 10ms between keystrokes is inhuman
+            botProbability += 0.3;
+            anomalies.push('inhuman_typing_speed');
+          }
+        }
+      }
+  
+      // 4. Analyze focus events
+      if (focusEvents.length === 0) {
+        botProbability += 0.2;
+        anomalies.push('no_focus_events');
+      } else {
+        // Check for proper focus/blur sequence
+        let focusBeforeInput = false;
+        
+        for (const event of focusEvents) {
+          if (event.type === 'focus' && event.timestamp <= keyPressTimings[0]?.timestamp) {
+            focusBeforeInput = true;
+            break;
+          }
+        }
+        
+        if (!focusBeforeInput && keyPressTimings.length > 0) {
+          botProbability += 0.2;
+          anomalies.push('input_before_focus');
+        }
+      }
+  
+      // 5. Analyze interaction time
+      const difficulty = challenge.difficulty || 3;
+      
+      // Calculate expected time based on difficulty (rough estimates)
+      const expectedMinTime = 2000 + (difficulty * 1000); // Higher difficulty = more time needed
+      
+      if (totalInteractionTime < expectedMinTime) {
+        // Suspiciously fast for the difficulty level
+        botProbability += 0.3;
+        anomalies.push('suspiciously_fast_completion');
+      }
+      
+      // Very long solving times might also be suspicious (data collection)
+      if (totalInteractionTime > 120000) { // 2 minutes
+        botProbability += 0.1;
+        anomalies.push('suspiciously_long_completion');
+      }
+  
+      // 6. Input correction analysis
+      // Humans typically make at least some corrections when typing
+      if (inputCorrections === 0 && keyPressTimings.length > 5) {
+        botProbability += 0.1;
+        anomalies.push('no_input_corrections');
+      }
+  
+      // 7. Consistency checks
+      // Check that reported data is consistent internally
+      const hasInconsistentData = (
+        // Mouse movements but no entropy calculation
+        (mouseMovements.length > 5 && !mouseEntropyScore) ||
+        // Keys pressed but no focus events
+        (keyPressTimings.length > 0 && focusEvents.length === 0) ||
+        // Reported interaction time doesn't match timestamp differences
+        (keyPressTimings.length > 1 && 
+         totalInteractionTime < 
+         (keyPressTimings[keyPressTimings.length - 1].timestamp - keyPressTimings[0].timestamp))
+      );
+      
+      if (hasInconsistentData) {
+        botProbability += 0.2;
+        anomalies.push('inconsistent_behavioral_data');
+      }
+  
+      // 8. Final scoring adjustments
+      // Cap probability between 0 and 1
+      botProbability = Math.min(Math.max(botProbability, 0), 1);
+      
+      // Adjust confidence based on amount of data available for analysis
+      if (mouseMovements.length > 20 && keyPressTimings.length > 5) {
+        confidence = 0.9; // High confidence with plenty of data
+      } else if (mouseMovements.length === 0 && keyPressTimings.length === 0) {
+        confidence = 0.6; // Lower confidence with minimal data
+      }
+      
+      // If correct answer but suspicious behavior, still mark as suspicious but less confident
+      if (answerCorrect && botProbability > 0.7) {
+        confidence *= 0.8; // Reduce confidence when signals conflict
+      }
+      
+      // If incorrect answer but human-like behavior, reduce bot probability slightly
+      if (!answerCorrect && anomalies.length <= 1 && mouseEntropyScore > 5) {
+        botProbability = Math.max(0.4, botProbability - 0.1); // Humans make mistakes too
+      }
+  
+      // Generate verification result
+      return {
+        valid: answerCorrect && botProbability < 0.6, // Valid if correct answer and not clearly bot-like
+        botProbability,
+        confidence,
+        details: {
+          answerCorrect,
+          expectedAnswer: correctAnswer,
+          userAnswer,
+          sequenceType: verificationData.sequenceType,
+          anomalies,
+          interactionTime: totalInteractionTime,
+          mouseMovementCount: mouseMovements.length,
+          keyPressCount: keyPressTimings.length,
+          mouseEntropyScore,
+          difficulty
+        }
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        botProbability: 0.5,
+        confidence: 0.3,
+        details: {
+          error: error.message,
+          message: 'Error during verification'
+        }
+      };
+    }
   }
 };

@@ -511,8 +511,7 @@ getClientCode(seed) {
    * @returns {Object} Parameter definitions with possible ranges/defaults
    */
   getParameterDefinitions() {
-    // WebGL test doesn't require any special parameters - 
-    // it uses challenge data directly
+    // WebGL test doesn't require any special parameters
     return {};
   },
 
