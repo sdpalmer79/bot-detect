@@ -265,8 +265,7 @@ module.exports = {
     id: "number_sequence",
     name: "Number Sequence Challenge",
     type: "interactive",
-    category: "cognitive",
-    difficultyLevel: 3 // Default difficulty, can be 1-5
+    category: "cognitive"
   },
 
   /**
@@ -351,7 +350,7 @@ module.exports = {
             
             // Create and add the sequence image
             const sequenceImage = document.createElement('img');
-            sequenceImage.src = "{{PARAM_IMAGE_BASE_URL}}" + challenge.imageUrl;
+            sequenceImage.src = {{PARAM_IMAGE_BASE_URL}} + challenge.imageUrl;
             sequenceImage.alt = 'Number sequence puzzle';
             sequenceImage.style.cssText = 'max-width: 100%; height: auto; display: inline-block;';
             imageContainer.appendChild(sequenceImage);
@@ -571,8 +570,12 @@ module.exports = {
    */
   generateChallengeParams(options) {
     // Extract the difficulty level (1-5)
-    const difficulty = options.difficultyLevel || this.meta.difficultyLevel;
+    const difficulty = options.difficultyLevel;
     
+    if (!difficulty || difficulty < 1 || difficulty > 5) {
+        throw new Error('Difficulty level must be between 1 and 5');
+    }
+
     // Create a deterministic seed for this challenge by combining suite seed and challenge id
     let seed = options.challengeId;
     if (options.suiteData && options.suiteData.seed) {

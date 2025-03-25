@@ -3,8 +3,15 @@ const path = require('path');
 const crypto = require('crypto');
 const sharedCode = require('@sdpalmer79/captcha-shared-code');
 
+// Import tests from the new unified structure
+const captchaTests = require('../../captcha-tests');
+
 const MIN_TESTS = parseEnvNumber(process.env.MIN_TESTS, 8);
-const MIN_INTERACTIVE_TESTS = parseEnvNumber(process.env.MIN_INTERACTIVE_TESTS, 3); 
+const MIN_INTERACTIVE_TESTS = parseEnvNumber(process.env.MIN_INTERACTIVE_TESTS, 1);
+const MAX_INTERACTIVE_TESTS = parseEnvNumber(process.env.MAX_INTERACTIVE_TESTS, 3);
+const TESTS_PER_CATEGORY = parseEnvNumber(process.env.TESTS_PER_CATEGORY, 2);
+const DUMMY_TESTS_MIN = parseEnvNumber(process.env.DUMMY_TESTS_MIN, 2);
+const DUMMY_TESTS_MAX = parseEnvNumber(process.env.DUMMY_TESTS_MAX, 5);
 
 function parseEnvNumber(value, defaultValue) {
   if (value === undefined || value === null || value === '') {
@@ -13,52 +20,6 @@ function parseEnvNumber(value, defaultValue) {
   
   const num = Number(value);
   return !isNaN(num) ? num : defaultValue;
-}
-
-// Separate loading of automatic and interactive templates
-const automaticTemplates = loadAutomaticTemplates();
-const interactiveTemplates = loadInteractiveTemplates();
-
-// Load all automatic test templates from autoTemplates.js
-function loadAutomaticTemplates() {
-  // Import test template modules
-  const {
-    tokenTests,
-    webglTests, 
-    timingTests, 
-    environmentTests, 
-    interactionTests,
-    networkTests,
-    inputBehaviorTests,
-    deviceIntegrityTests,
-    automationTests
-  } = require('./autoTemplates');
-  
-  // Return automatic templates object
-  return {
-    tokenTests,
-    webglTests, 
-    timingTests, 
-    environmentTests, 
-    interactionTests,
-    networkTests,
-    inputBehaviorTests,
-    deviceIntegrityTests,
-    automationTests
-  };
-}
-
-// Load all interactive test templates from interactiveTemplates.js
-function loadInteractiveTemplates() {
-  // Import interactive visual challenge templates
-  const {
-    numberSequenceCompletionTests
-  } = require('./interactiveTemplates');
-  
-  // Return interactive templates object
-  return {
-    numberSequenceCompletionTests
-  };
 }
 
 /**
@@ -88,88 +49,6 @@ function shuffleArray(array, seed) {
   return shuffled;
 }
 
-/**
- * Selects multiple tests from a category
- * @param {Object} templates - Test templates
- * @param {string} category - Category name (e.g., 'timingTests')
- * @param {Object} options - Selection options
- * @param {number} [options.maxCount=1] - Maximum number of tests to select
- * @param {Array<string>} [options.exclude=[]] - IDs to exclude
- * @param {Array<string>} [options.include=[]] - IDs to specifically include
- * @param {boolean} [options.randomize=true] - Whether to randomize selection
- * @param {string} [options.seed] - Seed for deterministic selection
- * @return {Array<Object>} - Selected tests
- */
-function selectMultipleFromCategory(templates, category, options = {}) {
-  const {
-    maxCount = 1,
-    exclude = [],
-    include = [],
-    randomize = true,
-    seed = crypto.randomBytes(8).toString('hex')
-  } = options;
-  
-  // Rest of the function should use maxCount instead of count
-  if (!templates[category] || !templates[category].variations || 
-      templates[category].variations.length === 0) {
-    return [];
-  }
-  
-  // First handle specifically included tests
-  let selectedTests = [];
-  
-  if (include && include.length > 0) {
-    include.forEach(id => {
-      const test = templates[category].variations.find(t => t.id === id);
-      if (test && !exclude.includes(id)) {
-        selectedTests.push(test);
-      }
-    });
-  }
-  
-  // Get available tests that aren't in the exclude list or already included
-  const alreadyIncludedIds = selectedTests.map(t => t.id);
-  const availableTests = templates[category].variations.filter(
-    test => !exclude.includes(test.id) && !alreadyIncludedIds.includes(test.id)
-  );
-  
-  if (availableTests.length === 0 && selectedTests.length === 0) {
-    return [];
-  }
-  
-  // If we need more tests to reach maxCount
-  if (selectedTests.length < maxCount) {
-    const remainingCount = maxCount - selectedTests.length;
-    
-    // If maxCount exceeds available tests, return all available plus included
-    if (remainingCount >= availableTests.length) {
-      return [...selectedTests, ...availableTests];
-    }
-    
-    // For deterministic selection, use the seed
-    if (randomize) {
-      // Create a seeded random number generator
-      const seedInt = parseInt(seed.substring(0, 8), 16);
-      const rng = new PseudoRandom(seedInt);
-      
-      // Fisher-Yates shuffle with seed
-      const shuffled = [...availableTests];
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(rng.next() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-      }
-      
-      // Return the requested number of tests plus included ones
-      return [...selectedTests, ...shuffled.slice(0, remainingCount)];
-    } else {
-      // For non-random selection, take the first N tests
-      return [...selectedTests, ...availableTests.slice(0, remainingCount)];
-    }
-  }
-  
-  return selectedTests;
-}
-  
 // Deterministic pseudo-random number generator
 class PseudoRandom {
   constructor(seed) {
@@ -184,242 +63,192 @@ class PseudoRandom {
 }
 
 /**
- * Selects random tests from various categories to use as dummy tests
- * @param {Object} templates - Automatic test templates
- * @param {string} seed - Seed for deterministic selection
- * @param {Array<string>} excludeIds - IDs of tests to exclude
- * @param {Object} [options] - Selection options
- * @param {number} [options.count] - Number of dummy tests to select (default: 2-5)
- * @param {Array<string>} [options.preferredCategories] - Categories to prefer for dummy tests
- * @return {Array<Object>} - Selected dummy tests
+ * Groups tests by their meta.category field
+ * @returns {Object} - Object with category keys and arrays of tests
  */
-function selectRandomDummyTests(templates, seed, excludeIds, options = {}) {
-    // Create a seeded random number generator
-    const seedInt = parseInt(seed.substring(0, 8), 16);
-    const rng = new PseudoRandom(seedInt);
-    
-    // Determine how many dummy tests to select
-    const minCount = options.minCount || 2;
-    const maxCount = options.maxCount || 5;
-    const count = minCount + Math.floor(rng.next() * (maxCount - minCount + 1));
-    
-    // Get preferred categories or use all available automatic categories
-    const preferredCategories = options.preferredCategories || Object.keys(templates);
-    
-    // Collect all available tests from preferred categories
-    const availableTests = [];
-    for (const category of preferredCategories) {
-      if (templates[category]?.variations) {
-        // Filter out tests that are already selected
-        const categoryTests = templates[category].variations.filter(
-          test => !excludeIds.includes(test.id)
-        );
-        availableTests.push(...categoryTests);
-      }
-    }
-    
-    // If no available tests, return empty array
-    if (availableTests.length === 0) {
-      return [];
-    }
-    
-    // Shuffle available tests using Fisher-Yates with seeded RNG
-    const shuffled = [...availableTests];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(rng.next() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    
-    // Select up to 'count' tests, but no more than available
-    const selected = shuffled.slice(0, Math.min(count, shuffled.length));
-    
-    // Mark the selected tests as dummy tests (not real verification tests)
-    return selected.map(test => ({
-      ...test,
-      isRealTest: false
-    }));
-}
+function getTestsByCategory() {
+  const automaticTests = captchaTests.getAllTests().filter(test => test.meta.type === 'automatic');
+  const categories = {};
   
-// Select a mix of tests
-function selectTests(seed, templates) {
-    // Always include token verification test
-    const tokenTests = selectMultipleFromCategory(templates, 'tokenTests', {
-      include: ['token_verification']
-    });
-
-    const webglTests = selectMultipleFromCategory(templates, 'webglTests', {
-      include: ['webgl_fingerprinting']
-    });
-    
-    const timingTests = selectMultipleFromCategory(templates, 'timingTests', {
-      maxCount: 2 + (parseInt(seed.substring(0, 2), 16) % 3), // 2-4 timing tests
-      seed: seed + '_timing'
-    });
-    
-    const environmentTests = selectMultipleFromCategory(templates, 'environmentTests', {
-      maxCount: 2 + (parseInt(seed.substring(0, 2), 16) % 3), // 2-4 environment tests
-      include: ['browser_fingerprint'],
-      seed: seed + '_environment'
-    });
-    
-    const networkTests = selectMultipleFromCategory(templates, 'networkTests', {
-      maxCount: 2 + (parseInt(seed.substring(0, 2), 16) % 3), // 2-4 network test
-      seed: seed + '_network'
-    });
-
-    // Combine all tests and mark them as real tests
-    const coreTests = [
-      ...tokenTests,
-      ...webglTests,
-      ...timingTests,
-      ...environmentTests,
-      ...networkTests
-    ].map(test => ({ ...test, isRealTest: true }));
-    
-    // Throw an error if we don't have enough tests
-    if (coreTests.length < MIN_TESTS) {
-      throw new Error(`Failed to select enough core tests: ${coreTests.length}`);
-    } 
-
-    // Select dummy tests from any category
-    const selectedIds = coreTests.map(t => t.id);
-    const dummyTests = selectRandomDummyTests(templates, seed, selectedIds);
-    
-    return [...coreTests, ...dummyTests];
-}
+  automaticTests.forEach(test => {
+    const category = test.meta.category;
+    if (!categories[category]) {
+      categories[category] = [];
+    }
+    categories[category].push(test);
+  });
   
+  return categories;
+}
+
 /**
- * Selects interactive tests of various difficulty levels for the suite
- * Each suite includes multiple interactive tests, but only one will be used at runtime
- * based on the automatic test results and bot probability assessment
- * 
+ * Selects X tests from each category based on environment variable
  * @param {string} seed - Seed for deterministic selection
- * @param {Object} templates - Interactive templates
- * @return {Array<Object>} - Selected interactive tests marked with isInteractive: true
+ * @returns {Array} - Selected tests marked as real tests
  */
-function selectInteractiveTests(seed, templates) {
-  // Get interactive test categories
-  const interactiveCategories = Object.keys(templates);
-  
-  // Create a deterministic random number generator
-  const seedInt = parseInt(seed.substring(0, 8), 16);
-  const rng = new PseudoRandom(seedInt);
-  
-  // We need exactly 3 tests - one for each difficulty level
+function selectRealTests(seed) {
+  const testsByCategory = getTestsByCategory();
   const selectedTests = [];
   
-  // Shuffle the categories to select from random ones
-  const shuffledCategories = [...interactiveCategories];
-  for (let i = shuffledCategories.length - 1; i > 0; i--) {
-    const j = Math.floor(rng.next() * (i + 1));
-    [shuffledCategories[i], shuffledCategories[j]] = [shuffledCategories[j], shuffledCategories[i]];
+  // 1. First, handle special core tests that must always be included
+  const tokenVerificationTest = captchaTests.automatic.tokenVerification;
+  const webGLTest = captchaTests.automatic.webGLFingerprinting;
+  
+  if (tokenVerificationTest) {
+    selectedTests.push({
+      test: tokenVerificationTest,
+      isRealTest: true,
+      originalId: tokenVerificationTest.meta.id
+    });
   }
   
-  // Define difficulty levels
-  const difficultyLevels = ['easy', 'medium', 'hard'];
-  
-  // For each difficulty level, attempt to select one test from a random category
-  difficultyLevels.forEach(difficultyLevel => {
-    // Group all tests from all categories by this difficulty level
-    const testsForDifficultyLevel = [];
-    
-    shuffledCategories.forEach(category => {
-      if (templates[category]?.variations) {
-        // Filter tests to only include those matching the current difficulty level
-        const matchingTests = templates[category].variations.filter(test => {
-          const difficulty = test.difficultyLevel || 5; // Default to medium
-          
-          if (difficultyLevel === 'easy' && difficulty <= 3) {
-            return true;
-          } else if (difficultyLevel === 'medium' && difficulty > 3 && difficulty <= 7) {
-            return true;
-          } else if (difficultyLevel === 'hard' && difficulty > 7) {
-            return true;
-          }
-          return false;
-        });
-        
-        // Add category information to each test
-        matchingTests.forEach(test => {
-          testsForDifficultyLevel.push({
-            ...test,
-            categoryName: templates[category].category
-          });
-        });
-      }
+  if (webGLTest) {
+    selectedTests.push({
+      test: webGLTest,
+      isRealTest: true,
+      originalId: webGLTest.meta.id
     });
+  }
+  
+  // Get ID of tests already selected
+  const selectedIds = selectedTests.map(item => item.test.meta.id);
+  
+  // 2. Then select X tests from each remaining category
+  Object.entries(testsByCategory).forEach(([category, tests]) => {
+    // Skip if all tests from this category are already selected
+    if (tests.every(test => selectedIds.includes(test.meta.id))) {
+      return;
+    }
     
-    // Randomly select one test from each difficulty level
-    if (testsForDifficultyLevel.length > 0) {
-      const selectedIndex = Math.floor(rng.next() * testsForDifficultyLevel.length);
-      const selectedTest = testsForDifficultyLevel[selectedIndex];
-      
-      // Add the selected test to the final list
-      const uniqueId = `test_${crypto.createHash('sha256').update(selectedTest.id + seed + selectedIndex).digest('hex').substring(0, 8)}`;
+    // Filter out already selected tests
+    const availableTests = tests.filter(test => !selectedIds.includes(test.meta.id));
     
-      // Create a unique name for this test function
-      const functionName = `interactive_${uniqueId}`;
+    // Create a seeded RNG for this category
+    const categorySeed = seed + category;
+    const shuffledTests = shuffleArray(availableTests, categorySeed);
     
+    // Select up to TESTS_PER_CATEGORY from this category
+    const testsToSelect = Math.min(TESTS_PER_CATEGORY, shuffledTests.length);
+    
+    for (let i = 0; i < testsToSelect; i++) {
+      const test = shuffledTests[i];
       selectedTests.push({
-        id: uniqueId,
-        functionName,
-        originalId: selectedTest.id,
-        code: selectedTest.code,
-        isInteractive: true,
-        difficultyLevel: selectedTest.difficultyLevel,
-        paramValues: generateTestParams(selectedTest, seed + selectedIndex, { transformSeed: seed})
+        test,
+        isRealTest: true,
+        originalId: test.meta.id
       });
+      selectedIds.push(test.meta.id);
     }
   });
-
-  // If we don't have enough tests, throw an error. max tests is always 3 - one for each difficulty level
-  if (selectedTests.length < MIN_INTERACTIVE_TESTS) {
-    throw new Error(`Failed to select enough interactive tests: ${selectedTests.length}`);
+  
+  // Check if we have enough tests
+  if (selectedTests.length < MIN_TESTS) {
+    throw new Error(`Failed to select enough real tests: ${selectedTests.length} < ${MIN_TESTS}`);
   }
   
   return selectedTests;
 }
 
 /**
- * Shuffles the order of tests in a deterministic way based on seed
- * Places tests in completely random order with no dependencies
- * 
- * @param {Array<Object>} tests - Array of selected tests
- * @param {string} seed - Random seed for shuffling
- * @return {Array<Object>} - Shuffled test array
+ * Selects random tests to use as dummy tests (not verified but used as noise)
+ * @param {string} seed - Seed for deterministic selection
+ * @param {Array<string>} excludeIds - IDs of tests to exclude
+ * @returns {Array} - Selected dummy tests
  */
-function shuffleTests(tests, seed) {
+function selectDummyTests(seed, excludeIds) {
   // Create a seeded random number generator
   const seedInt = parseInt(seed.substring(0, 8), 16);
   const rng = new PseudoRandom(seedInt);
   
-  // Create a copy of all tests to shuffle
-  const allTests = [...tests];
+  // Determine number of dummy tests to select (between min and max)
+  const dummyTestCount = DUMMY_TESTS_MIN + Math.floor(rng.next() * 
+                        (DUMMY_TESTS_MAX - DUMMY_TESTS_MIN + 1));
   
-  // Fisher-Yates shuffle with seeded RNG
-  for (let i = allTests.length - 1; i > 0; i--) {
-    const j = Math.floor(rng.next() * (i + 1));
-    [allTests[i], allTests[j]] = [allTests[j], allTests[i]];
+  // Get all automatic tests
+  const automaticTests = captchaTests.getAllTests().filter(test => 
+    test.meta.type === 'automatic' && !excludeIds.includes(test.meta.id));
+  
+  // If no available tests, return empty array
+  if (automaticTests.length === 0) {
+    return [];
   }
   
-  // Record the shuffle mapping for verification purposes
-  allTests.forEach((test, index) => {
-    test.originalIndex = tests.findIndex(t => t.id === test.id);
-    test.shuffledIndex = index;
-  });
+  // Shuffle available tests using the seed
+  const shuffledTests = shuffleArray(automaticTests, seed + "_dummy");
   
-  return allTests;
+  // Select dummy tests
+  const dummyTests = [];
+  for (let i = 0; i < Math.min(dummyTestCount, shuffledTests.length); i++) {
+    dummyTests.push({
+      test: shuffledTests[i],
+      isRealTest: false, // Mark as dummy test
+      originalId: shuffledTests[i].meta.id
+    });
+  }
+  
+  return dummyTests;
 }
-  
+
 /**
- * Generates parameter values for a test based on its paramRanges and a seed
- * @param {Object} test - Test object containing paramRanges
+ * Selects interactive tests based on user-defined criteria
+ * @param {string} seed - Seed for deterministic selection
+ * @returns {Array} - Selected interactive tests
+ */
+function selectInteractiveTests(seed) {
+  // Get all interactive tests
+  const interactiveTests = captchaTests.getAllTests().filter(test => 
+    test.meta.type === 'interactive');
+  
+  // Check if we have enough interactive tests
+  if (interactiveTests.length < MIN_INTERACTIVE_TESTS) {
+    throw new Error(`Not enough interactive tests available. Found ${interactiveTests.length}, but minimum required is ${MIN_INTERACTIVE_TESTS}`);
+  }
+  
+  // Create a seeded random number generator
+  const rng = new PseudoRandom(parseInt(seed.substring(0, 8), 16));
+  
+  // Determine how many tests to select (between min and max)
+  let numTests = MIN_INTERACTIVE_TESTS;
+  
+  // If we have enough tests, randomly select between min and max
+  if (interactiveTests.length > MIN_INTERACTIVE_TESTS) {
+    // Calculate a random number between MIN and MAX
+    const range = MAX_INTERACTIVE_TESTS - MIN_INTERACTIVE_TESTS;
+    numTests = MIN_INTERACTIVE_TESTS + Math.floor(rng.next() * (range + 1));
+  }
+  
+  // Cap to available tests (should never be less than MIN after the check above)
+  numTests = Math.min(numTests, interactiveTests.length);
+  
+  // Shuffle available tests using the seed
+  const shuffledTests = shuffleArray(interactiveTests, seed);
+  
+  // Select the tests
+  const selectedTests = [];
+  for (let i = 0; i < numTests; i++) {
+    selectedTests.push({
+      test: shuffledTests[i],
+      isInteractive: true,
+      originalId: shuffledTests[i].meta.id
+    });
+  }
+  
+  return selectedTests;
+}
+
+/**
+ * Generates parameter values for a test based on its parameter definitions and a seed
+ * @param {Object} test - Test object containing parameter definitions
  * @param {string} seed - Seed for deterministic parameter generation
+ * @param {Object} suiteParams - Suite-wide parameters
  * @return {Object} - Object mapping parameter names to values
  */
 function generateTestParams(test, seed, suiteParams = {}) {
-  // If test has no parameter ranges, return empty object
-  if (!test.paramRanges) {
+  // Get parameter definitions from the test
+  const parameterDefinitions = test.getParameterDefinitions ? 
+    test.getParameterDefinitions() : {};
+  
+  if (!parameterDefinitions || Object.keys(parameterDefinitions).length === 0) {
     return {};
   }
   
@@ -429,43 +258,40 @@ function generateTestParams(test, seed, suiteParams = {}) {
   
   const paramValues = {};
   
-  // Process each parameter in the ranges
-  Object.entries(test.paramRanges).forEach(([paramName, range]) => {
-    // Handle different parameter types
-    if (Array.isArray(range)) {
-      // Parameter is an array of possible values - select one randomly
-      const index = Math.floor(rng.next() * range.length);
-      paramValues[paramName] = range[index];
-    } else if (range === "DYNAMIC") {
-      // Generate a dynamic value based on seed
-      // Here we create a large random number between 10000-99999
-      paramValues[paramName] = 10000 + Math.floor(rng.next() * 90000);
-    } else if (range === "SUITE_TRANSFORM_SEED") {
-      // Use the provided suite-specific transform seed
-      // If not provided, generate a new one
-      paramValues[paramName] = suiteParams.transformSeed || 
-        crypto.randomBytes(16).toString('hex');
-    } else if (typeof range === 'object' && range !== null) {
-      // Handle range object with min/max/step values
-      const { min, max, step = 1 } = range;
-      const steps = Math.floor((max - min) / step) + 1;
-      const value = min + (Math.floor(rng.next() * steps) * step);
-      paramValues[paramName] = value;
-    } else if (typeof range === 'number') {
-      // If the parameter is just a single number, use it directly
-      paramValues[paramName] = range;
-    } else if (typeof range === 'string') {
-      // Handle self-reference to the test's own properties
-      if (range.startsWith('SELF.')) {
-        const property = range.split('.')[1];
-        paramValues[paramName] = test[property];
+  // Process each parameter in the definitions
+  Object.entries(parameterDefinitions).forEach(([paramName, paramDef]) => {
+    if (typeof paramDef === 'string') {
+      // Simple string parameter - direct value or special case
+      if (paramDef === "SUITE_TRANSFORM_SEED") {
+        // Use the provided suite-specific transform seed
+        paramValues[paramName] = suiteParams.transformSeed || 
+          crypto.randomBytes(16).toString('hex');
       } else {
-        // String constant
-        paramValues[paramName] = range;
+        // Just use the string value directly
+        paramValues[paramName] = paramDef;
+      }
+    } else if (typeof paramDef === 'object' && paramDef !== null) {
+      // Object parameter definition with min/max/step/default
+      if (paramDef.min !== undefined && paramDef.max !== undefined) {
+        const min = paramDef.min;
+        const max = paramDef.max;
+        const step = paramDef.step || 1;
+        
+        if (min === max) {
+          // Fixed value
+          paramValues[paramName] = min;
+        } else {
+          // Random value in range
+          const steps = Math.floor((max - min) / step) + 1;
+          paramValues[paramName] = min + (Math.floor(rng.next() * steps) * step);
+        }
+      } else if (paramDef.default !== undefined) {
+        // Use default value if no range is specified
+        paramValues[paramName] = paramDef.default;
       }
     } else {
-      // Default case - generate a random number between 0-999
-      paramValues[paramName] = Math.floor(rng.next() * 1000);
+      // For any other case, use the value as is
+      paramValues[paramName] = paramDef;
     }
   });
   
@@ -477,21 +303,24 @@ function createTestChain(testOrder, seed) {
   let previousTestId = null;
   
   for (let i = 0; i < testOrder.length; i++) {
-    const test = testOrder[i];
-    const uniqueId = `test_${crypto.createHash('sha256').update(test.id + seed + i).digest('hex').substring(0, 8)}`;
+    const testInfo = testOrder[i];
+    const uniqueId = `test_${crypto.createHash('sha256').update(testInfo.originalId + seed + i).digest('hex').substring(0, 8)}`;
     
     // Create a unique name for this test function
     const functionName = `auto_${uniqueId}`;
+    
+    // Get test code using the test's own method
+    const code = testInfo.test.getClientCode(seed + i);
     
     // Store the relationship between this test and previous test for chaining
     chainedTests.push({
       id: uniqueId,
       functionName,
-      originalId: test.id,
-      code: test.code,
-      isRealTest: test.isRealTest,
+      originalId: testInfo.originalId,
+      code,
+      isRealTest: testInfo.isRealTest,
       dependsOn: previousTestId,
-      paramValues: generateTestParams(test, seed + i)
+      paramValues: generateTestParams(testInfo.test, seed + i, { transformSeed: seed })
     });
     
     previousTestId = uniqueId;
@@ -500,12 +329,41 @@ function createTestChain(testOrder, seed) {
   return chainedTests;
 }
 
+/**
+ * Processes selected interactive tests
+ * @param {Array} interactiveTests - Array of selected interactive tests
+ * @param {string} seed - Seed for deterministic generation
+ * @returns {Array} - Processed interactive tests
+ */
+function processInteractiveTests(interactiveTests, seed) {
+  return interactiveTests.map((testInfo, index) => {
+    const uniqueId = `test_${crypto.createHash('sha256').update(testInfo.originalId + seed + index).digest('hex').substring(0, 8)}`;
+    
+    // Create a unique name for this interactive test function
+    const functionName = `interactive_${uniqueId}`;
+    
+    // Get code using the test's own method
+    const code = testInfo.test.getClientCode(seed + index);
+    
+    return {
+      id: uniqueId,
+      functionName,
+      originalId: testInfo.originalId,
+      code,
+      isInteractive: true,
+      paramValues: generateTestParams(testInfo.test, seed + index, { transformSeed: seed })
+    };
+  });
+}
+
 function generateTestFunctions(chainedTests) {
   return chainedTests.map(test => {
     // Replace parameter placeholders with actual values
     let code = test.code;
     Object.entries(test.paramValues).forEach(([key, value]) => {
-      code = code.replace(new RegExp(key, 'g'), JSON.stringify(value));
+      const placeholder = new RegExp(`{{${key}}}`, 'g');
+      const valueStr = JSON.stringify(value);
+      code = code.replace(placeholder, valueStr);
     });
     
     // Replace function name placeholder
@@ -522,7 +380,6 @@ function generateTestFunctions(chainedTests) {
  * @return {string} - Generated JavaScript code for test execution chain
  */
 function generateTestExecutionChain(chainedTests) {
-  
   // Generate test execution code
   const executionCode = chainedTests.map(test => `
   // Execute test: ${test.originalId} (${test.id})
@@ -752,67 +609,82 @@ window.CaptchaSystem = {
 }
 
 function generateUniqueSuite(suiteId, baseSuiteDir) {
-    // Generate a unique seed for this suite
-    const suiteSeed = crypto.randomBytes(16).toString('hex');
-    
-    // 1. Select automatic tests
-    const selectedAutomaticTests = selectTests(suiteSeed, automaticTemplates);
-    
-    // 2. Select interactive tests of various difficulty levels
-    const selectedInteractiveTests = selectInteractiveTests(suiteSeed, interactiveTemplates);
-    
-    // 3. Generate unique test order for automatic tests
-    const testOrder = shuffleTests(selectedAutomaticTests, suiteSeed);
-    
-    // 4. Create test chain linkages for automatic tests
-    const chainedTests = createTestChain(testOrder, suiteSeed);
-    
-    // 5. Assemble the suite code with both automatic and interactive tests
-    const suiteCode = assembleSuiteCode(chainedTests, suiteSeed, selectedInteractiveTests);
-    
-    // 6. Create the suite directory
-    const suiteDir = path.join(baseSuiteDir, `${suiteId}`);
-    fs.mkdirSync(suiteDir, { recursive: true });
-    
-    // 7. Create original source version (for debugging)
-    fs.writeFileSync(path.join(suiteDir, 'test-suite.src.js'), suiteCode);
-    
-    // 8. Create the suite data
-    const suiteData = {
-      // Suite identity
-      suiteId: suiteId,
-      created: new Date().toISOString(),
-      suiteSeed: suiteSeed,
-      
-      tests: chainedTests.map(test => ({
-        id: test.id,
-        originalId: test.originalId,
-        functionName: test.functionName,
-        isRealTest: test.isRealTest,
-        dependsOn: test.dependsOn,
-        paramValues: test.paramValues,
-        isInteractive: false
-      })),
-      
-      // Add separate array for interactive tests
-      interactiveTests: selectedInteractiveTests.map(test => ({
-        id: test.id,
-        originalId: test.originalId,
-        functionName: test.functionName,
-        difficultyLevel: test.difficultyLevel,
-        paramValues: test.paramValues,
-        isInteractive: true
-      }))
-    };
+  // Generate a unique seed for this suite
+  const suiteSeed = crypto.randomBytes(16).toString('hex');
+  
+  // 1. Select X tests from each category and mark as real tests
+  const realTests = selectRealTests(suiteSeed);
+  
+  // 2. Get IDs of real tests to exclude from dummy selection
+  const realTestIds = realTests.map(test => test.test.meta.id);
+  
+  // 3. Select Y random dummy tests
+  const dummyTests = selectDummyTests(suiteSeed, realTestIds);
+  
+  // 4. Combine real and dummy tests
+  const allAutomaticTests = [...realTests, ...dummyTests];
+  
+  // 5. Shuffle the test order using the seed
+  const shuffledTests = shuffleArray(allAutomaticTests, suiteSeed);
+  
+  // 6. Create test chain linkages
+  const chainedTests = createTestChain(shuffledTests, suiteSeed);
+  
+  // 7. Select interactive tests based on difficulty levels
+  const interactiveTestsRaw = selectInteractiveTests(suiteSeed);
+  
+  // 8. Process the interactive tests (similar to chained tests)
+  const processedInteractiveTests = processInteractiveTests(interactiveTestsRaw, suiteSeed);
+  
+  // 9. Create the suite directory
+  const suiteDir = path.join(baseSuiteDir, `${suiteId}`);
+  fs.mkdirSync(suiteDir, { recursive: true });
 
-    // Write suite data to file
-    fs.writeFileSync(path.join(suiteDir, 'suite-data.json'), JSON.stringify(suiteData, null, 2));
-        
-    return {
-      suiteId,
-      suiteDir,
-      suiteData
-    };
-  }
+  // 10. Create images directory for any tests that need it
+  const imagesDir = path.join(suiteDir, 'images');
+  fs.mkdirSync(imagesDir, { recursive: true });
+  
+  // 11. Assemble the suite code
+  const suiteCode = assembleSuiteCode(chainedTests, suiteSeed, processedInteractiveTests);
+  
+  // 12. Create original source version (for debugging)
+  fs.writeFileSync(path.join(suiteDir, 'test-suite.src.js'), suiteCode);
+  
+  // 13. Create the suite data
+  const suiteData = {
+    // Suite identity
+    suiteId: suiteId,
+    created: new Date().toISOString(),
+    suiteSeed: suiteSeed,
+    
+    tests: chainedTests.map(test => ({
+      id: test.id,
+      originalId: test.originalId,
+      functionName: test.functionName,
+      isRealTest: test.isRealTest,
+      dependsOn: test.dependsOn,
+      paramValues: test.paramValues,
+      isInteractive: false
+    })),
+    
+    // Add separate array for interactive tests
+    interactiveTests: processedInteractiveTests.map(test => ({
+      id: test.id,
+      originalId: test.originalId,
+      functionName: test.functionName,
+      paramValues: test.paramValues,
+      isInteractive: true
+    }))
+  };
 
-  module.exports = { generateUniqueSuite: generateUniqueSuite };
+  // Write suite data to file
+  fs.writeFileSync(path.join(suiteDir, 'suite-data.json'), JSON.stringify(suiteData, null, 2));
+      
+  return {
+    suiteId,
+    suiteDir,
+    suiteData
+  };
+}
+
+module.exports = { generateUniqueSuite };
