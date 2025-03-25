@@ -8,7 +8,7 @@
 
 const crypto = require('crypto');
 const path = require('path');
-const fs = require('fs');
+const fs = require('.fs');
 const { createCanvas, registerFont } = require('canvas');
 const os = require('os');
 
@@ -350,7 +350,7 @@ module.exports = {
       
       // Create and add the sequence image
       const sequenceImage = document.createElement('img');
-      sequenceImage.src = {{PARAM_IMAGE_BASE_URL}} + challenge.imageUrl;
+      sequenceImage.src = {{PARAM_IMAGE_BASE_URL}} + challenge.clientParams.imageUrl;
       sequenceImage.alt = 'Number sequence puzzle';
       sequenceImage.style.cssText = 'max-width: 100%; height: auto; display: inline-block;';
       imageContainer.appendChild(sequenceImage);
@@ -370,18 +370,16 @@ module.exports = {
       choicesContainer.style.cssText = 'display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: 100%;';
       
       // Get the possible answers (combine correct and wrong answers)
-      const correctAnswer = challenge.verificationData.correctAnswer;
-      const wrongAnswers = challenge.verificationData.wrongAnswers || [];
-      const allAnswers = [correctAnswer, ...wrongAnswers];
+      const answerOptions = challenge.clientParams.answerOptions;
       
       // Shuffle the answers (Fisher-Yates algorithm)
-      for (let i = allAnswers.length - 1; i > 0; i--) {
+      for (let i = answerOptions.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [allAnswers[i], allAnswers[j]] = [allAnswers[j], allAnswers[i]];
+        [answerOptions[i], answerOptions[j]] = [answerOptions[j], answerOptions[i]];
       }
       
       // Create a button for each option
-      allAnswers.forEach(answer => {
+      answerOptions.forEach(answer => {
         const button = document.createElement('button');
         button.textContent = answer;
         button.dataset.value = answer;
@@ -453,7 +451,7 @@ module.exports = {
           const userAnswer = parseInt(button.dataset.value, 10);
           
           // Visual feedback
-          allAnswers.forEach(answer => {
+          answerOptions.forEach(answer => {
             const btn = Array.from(choicesContainer.children).find(
               b => parseInt(b.dataset.value, 10) === answer
             );
@@ -534,13 +532,9 @@ module.exports = {
 
   /**
    * Generates challenge-specific parameters based on difficulty/context
-   * This is the key function that will:
-   * 1. Generate a number sequence based on difficulty
-   * 2. Create a distorted image of the sequence
-   * 3. Return image URL and challenge parameters
    * 
    * @param {Object} options - Context for parameter generation
-   * @returns {Object} Challenge-specific parameters
+   * @returns {Object} Standardized challenge parameters
    */
   generateChallengeParams(options) {
     // Extract the difficulty level (1-5)
@@ -712,9 +706,6 @@ module.exports = {
         break;
     }
     
-    // Generate a unique challenge ID for this sequence
-    const challengeId = crypto.randomBytes(16).toString('hex');
-    
     // Generate wrong answers for multiple choice
     // For arithmetic, use increments off by 1-3
     // For geometric, use ratios off by 1
@@ -744,34 +735,34 @@ module.exports = {
     const imageInfo = generateSequenceImage(
       sequenceValues,
       distortionParams,
-      challengeId,
+      options.challengeId,
       { 
         suiteId: options.suiteId || crypto.randomBytes(8).toString('hex')
       }
     );
     
-    // Return challenge parameters with image URL - removed expiresAt and difficulty
+    // Generate all possible answers (correct + wrong) for client-side
+    const allAnswers = [correctAnswer, ...wrongAnswers];
+    
+    // Return standardized challenge parameters structure
     return {
-      challengeId,
+      // Standard metadata
+      challengeId: options.challengeId,
       
-      // Return the relative image URL for client-side loading
-      imageUrl: imageInfo.relativePath,
-      imageWidth: imageInfo.width,
-      imageHeight: imageInfo.height,
-      
-      // Parameters used for image generation (for reference/debugging)
-      renderingParams: {
-        sequenceValues,
-        distortionParams
+      // Client-side parameters (public)
+      clientParams: {
+        imageUrl: imageInfo.relativePath,
+        imageWidth: imageInfo.width,
+        imageHeight: imageInfo.height,
+        answerOptions: allAnswers, // All possible answers without indicating which is correct
       },
       
-      // Data needed for verification (would be stored securely server-side)
-      verificationData: {
+      // Verification parameters (private, server-side only)
+      verificationParams: {
         correctAnswer,
         sequenceType: sequenceParams.type,
         sequenceParams,
-        wrongAnswers,
-        generatedAt: Date.now()
+        difficulty
       }
     };
   },
@@ -785,7 +776,7 @@ module.exports = {
    */
   verifyResult(result, challenge, testParams) {
     try {
-      // Check for basic errors or timeouts
+      // Check for basic errors
       if (!result || result.error) {
         return {
           valid: false,
@@ -798,9 +789,9 @@ module.exports = {
         };
       }
   
-      // Access verification data from the challenge
-      const verificationData = challenge.verificationData;
-      if (!verificationData || !verificationData.correctAnswer) {
+      // Access verification parameters
+      const verificationParams = challenge.verificationParams;
+      if (!verificationParams || !verificationParams.correctAnswer) {
         return {
           valid: false,
           botProbability: 0.5,
@@ -818,7 +809,7 @@ module.exports = {
   
       // 1. Verify answer correctness
       const userAnswer = result.userAnswer;
-      const correctAnswer = verificationData.correctAnswer;
+      const correctAnswer = verificationParams.correctAnswer;
       const answerCorrect = (userAnswer === correctAnswer);
   
       // If answer is incorrect, increase bot probability
@@ -938,7 +929,7 @@ module.exports = {
       }
   
       // 5. Analyze interaction time
-      const difficulty = challenge.difficulty || 3;
+      const difficulty = verificationParams.difficulty;
       
       // Calculate expected time based on difficulty (rough estimates)
       const expectedMinTime = 2000 + (difficulty * 1000); // Higher difficulty = more time needed
@@ -1003,14 +994,14 @@ module.exports = {
   
       // Generate verification result
       return {
-        valid: answerCorrect && botProbability < 0.6, // Valid if correct answer and not clearly bot-like
+        valid: answerCorrect && botProbability < 0.6,
         botProbability,
         confidence,
         details: {
           answerCorrect,
           expectedAnswer: correctAnswer,
           userAnswer,
-          sequenceType: verificationData.sequenceType,
+          sequenceType: verificationParams.sequenceType,
           anomalies,
           interactionTime: totalInteractionTime,
           mouseMovementCount: mouseMovements.length,
