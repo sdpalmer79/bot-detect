@@ -301,241 +301,223 @@ module.exports = {
     return [
       {
         id: "number_sequence_standard",
-        description: "Standard input field for entering the next number in sequence",
+        description: "Multiple choice options for selecting the next number in sequence",
         code: `async function TEST_FUNCTION_NAME(ctx) {
-          try {
-            // Extract parameters from context
-            const challenge = ctx.challenge || {};
-            const testParams = ctx.testParams || {};
+    try {
+      // Extract parameters from context
+      const challenge = ctx.challenge || {};
+      const testParams = ctx.testParams || {};
+      
+      // Track behavioral data for bot detection
+      const behavioralData = {
+        mouseMovements: [],
+        keyPressTimings: [],
+        focusEvents: [],
+        totalInteractionTime: 0,
+        optionHoverData: [],
+        startTime: Date.now()
+      };
+      
+      // Track mouse movements
+      const trackMouseMovement = (e) => {
+        behavioralData.mouseMovements.push({
+          x: e.clientX,
+          y: e.clientY,
+          timestamp: Date.now()
+        });
+      };
+      
+      // Create container element
+      const container = document.createElement('div');
+      container.className = 'sequence-challenge-container';
+      container.style.cssText = 'width: 100%; max-width: 500px; margin: 0 auto; padding: 20px; font-family: sans-serif; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); background: #fff;';
+      
+      // Add title
+      const title = document.createElement('h2');
+      title.textContent = 'Number Sequence Challenge';
+      title.style.cssText = 'margin-top: 0; color: #333; font-size: 18px;';
+      container.appendChild(title);
+      
+      // Add instructions
+      const instructions = document.createElement('p');
+      instructions.textContent = 'Look at the sequence of numbers below and determine what number should come next.';
+      instructions.style.cssText = 'margin-bottom: 20px; color: #555; font-size: 14px;';
+      container.appendChild(instructions);
+      
+      // Create image container
+      const imageContainer = document.createElement('div');
+      imageContainer.style.cssText = 'width: 100%; text-align: center; margin-bottom: 25px; border: 1px solid #eee; padding: 10px; border-radius: 4px; background: #f9f9f9;';
+      
+      // Create and add the sequence image
+      const sequenceImage = document.createElement('img');
+      sequenceImage.src = {{PARAM_IMAGE_BASE_URL}} + challenge.imageUrl;
+      sequenceImage.alt = 'Number sequence puzzle';
+      sequenceImage.style.cssText = 'max-width: 100%; height: auto; display: inline-block;';
+      imageContainer.appendChild(sequenceImage);
+      container.appendChild(imageContainer);
+      
+      // Create options area
+      const optionsArea = document.createElement('div');
+      optionsArea.style.cssText = 'margin: 20px 0; display: flex; flex-direction: column; align-items: center;';
+      
+      const optionsLabel = document.createElement('p');
+      optionsLabel.textContent = 'Select the number that comes next in the sequence:';
+      optionsLabel.style.cssText = 'margin-bottom: 15px; font-weight: bold; color: #333; text-align: center;';
+      optionsArea.appendChild(optionsLabel);
+      
+      // Create choices container
+      const choicesContainer = document.createElement('div');
+      choicesContainer.style.cssText = 'display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: 100%;';
+      
+      // Get the possible answers (combine correct and wrong answers)
+      const correctAnswer = challenge.verificationData.correctAnswer;
+      const wrongAnswers = challenge.verificationData.wrongAnswers || [];
+      const allAnswers = [correctAnswer, ...wrongAnswers];
+      
+      // Shuffle the answers (Fisher-Yates algorithm)
+      for (let i = allAnswers.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [allAnswers[i], allAnswers[j]] = [allAnswers[j], allAnswers[i]];
+      }
+      
+      // Create a button for each option
+      allAnswers.forEach(answer => {
+        const button = document.createElement('button');
+        button.textContent = answer;
+        button.dataset.value = answer;
+        button.style.cssText = \`
+          padding: 12px 20px;
+          margin: 5px;
+          font-size: 16px;
+          background-color: #f0f0f0;
+          border: 2px solid #ddd;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: all 0.2s;
+          min-width: 70px;
+        \`;
+        
+        // Track hover events for bot detection
+        button.addEventListener('mouseenter', () => {
+          behavioralData.optionHoverData.push({
+            value: answer,
+            type: 'mouseenter',
+            timestamp: Date.now()
+          });
+          
+          // Visual feedback
+          button.style.backgroundColor = '#e0e0e0';
+          button.style.borderColor = '#ccc';
+        });
+        
+        button.addEventListener('mouseleave', () => {
+          behavioralData.optionHoverData.push({
+            value: answer,
+            type: 'mouseleave',
+            timestamp: Date.now()
+          });
+          
+          // Reset visual style
+          button.style.backgroundColor = '#f0f0f0';
+          button.style.borderColor = '#ddd';
+        });
+        
+        choicesContainer.appendChild(button);
+      });
+      
+      optionsArea.appendChild(choicesContainer);
+      
+      // Add status message area
+      const statusMessage = document.createElement('div');
+      statusMessage.style.cssText = 'margin-top: 15px; min-height: 20px; text-align: center;';
+      optionsArea.appendChild(statusMessage);
+      
+      container.appendChild(optionsArea);
+      
+      // Start tracking mouse movements throughout the container
+      container.addEventListener('mousemove', trackMouseMovement);
+      
+      // Attach to DOM
+      const challengeContainer = document.getElementById(ctx.containerId);
+      if (challengeContainer) {
+        challengeContainer.appendChild(container);
+      }
+      
+      return new Promise((resolve) => {
+        // Handle option selection
+        choicesContainer.addEventListener('click', (e) => {
+          const button = e.target.closest('button');
+          if (!button) return;
+          
+          // Get selected answer
+          const userAnswer = parseInt(button.dataset.value, 10);
+          
+          // Visual feedback
+          allAnswers.forEach(answer => {
+            const btn = Array.from(choicesContainer.children).find(
+              b => parseInt(b.dataset.value, 10) === answer
+            );
             
-            // Track behavioral data for bot detection
-            const behavioralData = {
-              mouseMovements: [],
-              keyPressTimings: [],
-              focusEvents: [],
-              totalInteractionTime: 0,
-              inputCorrections: 0,
-              startTime: Date.now()
-            };
-            
-            // Track mouse movements
-            const trackMouseMovement = (e) => {
-              behavioralData.mouseMovements.push({
-                x: e.clientX,
-                y: e.clientY,
-                timestamp: Date.now()
-              });
-            };
-            
-            // Create container element
-            const container = document.createElement('div');
-            container.className = 'sequence-challenge-container';
-            container.style.cssText = 'width: 100%; max-width: 500px; margin: 0 auto; padding: 20px; font-family: sans-serif; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); background: #fff;';
-            
-            // Add title
-            const title = document.createElement('h2');
-            title.textContent = 'Number Sequence Challenge';
-            title.style.cssText = 'margin-top: 0; color: #333; font-size: 18px;';
-            container.appendChild(title);
-            
-            // Add instructions
-            const instructions = document.createElement('p');
-            instructions.textContent = 'Look at the sequence of numbers below and determine what number should come next.';
-            instructions.style.cssText = 'margin-bottom: 20px; color: #555; font-size: 14px;';
-            container.appendChild(instructions);
-            
-            // Create image container
-            const imageContainer = document.createElement('div');
-            imageContainer.style.cssText = 'width: 100%; text-align: center; margin-bottom: 25px; border: 1px solid #eee; padding: 10px; border-radius: 4px; background: #f9f9f9;';
-            
-            // Create and add the sequence image
-            const sequenceImage = document.createElement('img');
-            sequenceImage.src = {{PARAM_IMAGE_BASE_URL}} + challenge.imageUrl;
-            sequenceImage.alt = 'Number sequence puzzle';
-            sequenceImage.style.cssText = 'max-width: 100%; height: auto; display: inline-block;';
-            imageContainer.appendChild(sequenceImage);
-            container.appendChild(imageContainer);
-            
-            // Create input area
-            const inputArea = document.createElement('div');
-            inputArea.style.cssText = 'margin: 20px 0; display: flex; flex-direction: column; align-items: center;';
-            
-            const inputLabel = document.createElement('label');
-            inputLabel.htmlFor = 'sequence-answer';
-            inputLabel.textContent = 'What number comes next in the sequence?';
-            inputLabel.style.cssText = 'margin-bottom: 10px; font-weight: bold; color: #333;';
-            inputArea.appendChild(inputLabel);
-            
-            // Create input group (input + button)
-            const inputGroup = document.createElement('div');
-            inputGroup.style.cssText = 'display: flex; width: 100%; max-width: 300px; margin: 0 auto;';
-            
-            const input = document.createElement('input');
-            input.type = 'number';
-            input.id = 'sequence-answer';
-            input.placeholder = 'Enter number';
-            input.style.cssText = 'flex: 1; padding: 10px 15px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px 0 0 4px; outline: none;';
-            
-            const submitButton = document.createElement('button');
-            submitButton.textContent = 'Submit';
-            submitButton.style.cssText = 'padding: 10px 20px; background: #3366cc; color: white; border: none; border-radius: 0 4px 4px 0; cursor: pointer; font-weight: bold;';
-            submitButton.disabled = true;
-            
-            // Add input event tracking for bot detection
-            input.addEventListener('keydown', (e) => {
-              behavioralData.keyPressTimings.push({
-                key: e.key,
-                keyCode: e.keyCode,
-                timestamp: Date.now(),
-                type: 'keydown'
-              });
-            });
-            
-            input.addEventListener('input', (e) => {
-              // Enable submit button if we have an answer
-              submitButton.disabled = !e.target.value;
-              
-              // Track input changes
-              if (e.target.value.length > 0 && e.inputType === 'deleteContentBackward') {
-                behavioralData.inputCorrections++;
-              }
-            });
-            
-            // Track focus events
-            input.addEventListener('focus', () => {
-              behavioralData.focusEvents.push({
-                type: 'focus',
-                timestamp: Date.now()
-              });
-            });
-            
-            input.addEventListener('blur', () => {
-              behavioralData.focusEvents.push({
-                type: 'blur',
-                timestamp: Date.now()
-              });
-            });
-            
-            inputGroup.appendChild(input);
-            inputGroup.appendChild(submitButton);
-            inputArea.appendChild(inputGroup);
-            
-            // Add status message area
-            const statusMessage = document.createElement('div');
-            statusMessage.style.cssText = 'margin-top: 15px; min-height: 20px; text-align: center;';
-            inputArea.appendChild(statusMessage);
-            
-            container.appendChild(inputArea);
-            
-            // Create timer display (for challenge timeout)
-            const timerDisplay = document.createElement('div');
-            timerDisplay.style.cssText = 'text-align: center; color: #777; font-size: 14px; margin-top: 10px;';
-            timerDisplay.textContent = 'Time remaining: ' + Math.floor(testParams.PARAM_CHALLENGE_TIMEOUT / 1000) + ' seconds';
-            container.appendChild(timerDisplay);
-            
-            // Start tracking mouse movements throughout the container
-            container.addEventListener('mousemove', trackMouseMovement);
-            
-            // Attach to DOM
-            const challengeContainer = document.getElementById(ctx.containerId);
-            if (challengeContainer) {
-              challengeContainer.appendChild(container);
-              
-              // Auto-focus the input field after a short delay
-              setTimeout(() => {
-                input.focus();
-              }, 300);
+            if (btn) {
+              btn.style.backgroundColor = '#f0f0f0';
+              btn.style.borderColor = '#ddd';
+              btn.disabled = true;
+            }
+          });
+          
+          button.style.backgroundColor = '#3366cc';
+          button.style.borderColor = '#3366cc';
+          button.style.color = 'white';
+          
+          // Calculate completion time
+          behavioralData.totalInteractionTime = Date.now() - behavioralData.startTime;
+          
+          // Sample mouse movement data if too large (keep at most 100 points)
+          if (behavioralData.mouseMovements.length > 100) {
+            const samplingFactor = Math.floor(behavioralData.mouseMovements.length / 100);
+            behavioralData.mouseMovements = behavioralData.mouseMovements.filter((_, i) => i % samplingFactor === 0);
+          }
+          
+          // Calculate mouse movement entropy (measure of randomness/humanity)
+          let entropy = 0;
+          if (behavioralData.mouseMovements.length > 5) {
+            // Calculate distances between consecutive points
+            const distances = [];
+            for (let i = 1; i < behavioralData.mouseMovements.length; i++) {
+              const prev = behavioralData.mouseMovements[i-1];
+              const curr = behavioralData.mouseMovements[i];
+              const distance = Math.sqrt(
+                Math.pow(curr.x - prev.x, 2) + 
+                Math.pow(curr.y - prev.y, 2)
+              );
+              distances.push(distance);
             }
             
-            // Setup timer countdown
-            const startTime = Date.now();
-            const timeoutMs = {{PARAM_CHALLENGE_TIMEOUT}};
-            
-            const timerInterval = setInterval(() => {
-              const elapsed = Date.now() - startTime;
-              const remaining = Math.max(0, timeoutMs - elapsed);
-              const secondsRemaining = Math.ceil(remaining / 1000);
-              
-              timerDisplay.textContent = 'Time remaining: ' + secondsRemaining + ' seconds';
-              
-              if (remaining <= 0) {
-                clearInterval(timerInterval);
-                timerDisplay.textContent = 'Time expired!';
-                timerDisplay.style.color = '#cc0000';
-                input.disabled = true;
-                submitButton.disabled = true;
-                
-                statusMessage.textContent = 'You ran out of time. Please try again.';
-                statusMessage.style.color = '#cc0000';
-                
-                // Return timeout result
-                resolve({
-                  success: false,
-                  reason: 'timeout',
-                  userAnswer: input.value || null,
-                  behavioralData
-                });
-              }
-            }, 1000);
-            
-            return new Promise((resolve) => {
-              // Handle submission
-              submitButton.addEventListener('click', () => {
-                // Stop timer
-                clearInterval(timerInterval);
-                
-                // Get user's answer
-                const userAnswer = parseInt(input.value, 10);
-                
-                // Calculate completion time
-                behavioralData.totalInteractionTime = Date.now() - behavioralData.startTime;
-                
-                // Sample mouse movement data if too large (keep at most 100 points)
-                if (behavioralData.mouseMovements.length > 100) {
-                  const samplingFactor = Math.floor(behavioralData.mouseMovements.length / 100);
-                  behavioralData.mouseMovements = behavioralData.mouseMovements.filter((_, i) => i % samplingFactor === 0);
-                }
-                
-                // Calculate mouse movement entropy (measure of randomness/humanity)
-                let entropy = 0;
-                if (behavioralData.mouseMovements.length > 5) {
-                  // Calculate distances between consecutive points
-                  const distances = [];
-                  for (let i = 1; i < behavioralData.mouseMovements.length; i++) {
-                    const prev = behavioralData.mouseMovements[i-1];
-                    const curr = behavioralData.mouseMovements[i];
-                    const distance = Math.sqrt(
-                      Math.pow(curr.x - prev.x, 2) + 
-                      Math.pow(curr.y - prev.y, 2)
-                    );
-                    distances.push(distance);
-                  }
-                  
-                  // Calculate standard deviation of distances as a simple entropy measure
-                  const mean = distances.reduce((sum, val) => sum + val, 0) / distances.length;
-                  const variance = distances.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / distances.length;
-                  entropy = Math.sqrt(variance);
-                }
-                
-                behavioralData.mouseEntropyScore = entropy;
-                
-                // Return the result
-                resolve({
-                  userAnswer,
-                  success: true,
-                  behavioralData
-                });
-              });
-            });
-          } catch (error) {
-            console.error('Error in number sequence challenge:', error);
-            return {
-              success: false,
-              error: error.message
-            };
+            // Calculate standard deviation of distances as a simple entropy measure
+            const mean = distances.reduce((sum, val) => sum + val, 0) / distances.length;
+            const variance = distances.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / distances.length;
+            entropy = Math.sqrt(variance);
           }
-        }`
-      }
+          
+          behavioralData.mouseEntropyScore = entropy;
+          
+          // Return the result
+          resolve({
+            userAnswer,
+            success: true,
+            behavioralData
+          });
+        });
+      });
+    } catch (error) {
+      console.error('Error in number sequence challenge:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }`
+}
     ];
   },
 
@@ -546,15 +528,7 @@ module.exports = {
   getParameterDefinitions() {
     return {
       // Parameter for image URL prefix
-      "PARAM_IMAGE_BASE_URL": "", // Empty string default - will be set during suite generation
-      
-      // Challenge timeout in milliseconds - can be a range or fixed value
-      "PARAM_CHALLENGE_TIMEOUT": {
-        min: 10000,
-        max: 120000,
-        step: 1000,
-        default: 30000
-      }
+      "PARAM_IMAGE_BASE_URL": "" // Empty string default - will be set during suite generation
     };
   },
 
@@ -741,9 +715,6 @@ module.exports = {
     // Generate a unique challenge ID for this sequence
     const challengeId = crypto.randomBytes(16).toString('hex');
     
-    // Set expiration time (5 minutes from now)
-    const expiresAt = Date.now() + 300000;
-    
     // Generate wrong answers for multiple choice
     // For arithmetic, use increments off by 1-3
     // For geometric, use ratios off by 1
@@ -779,11 +750,9 @@ module.exports = {
       }
     );
     
-    // Return challenge parameters with image URL
+    // Return challenge parameters with image URL - removed expiresAt and difficulty
     return {
       challengeId,
-      expiresAt,
-      difficulty,
       
       // Return the relative image URL for client-side loading
       imageUrl: imageInfo.relativePath,
@@ -825,17 +794,6 @@ module.exports = {
           details: {
             error: result?.error || 'Invalid test result',
             message: 'Test returned an error or invalid result'
-          }
-        };
-      }
-  
-      if (result.reason === 'timeout') {
-        return {
-          valid: false,
-          botProbability: 0.4, // Timeouts can happen to humans too
-          confidence: 0.6,
-          details: {
-            message: 'Challenge timed out'
           }
         };
       }
