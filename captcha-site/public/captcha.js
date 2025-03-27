@@ -159,32 +159,30 @@
         
         try {
           // Run verification tests - this doesn't make the API call yet
-          const verificationResults = await window.CaptchaSystem.startAutoVerify(challenge);
-          console.log("Verification results:", verificationResults);
+          const autoResults = await window.CaptchaSystem.startAutoVerify(challenge);
+          console.log("Verification results:", autoResults);
           
           // Check if we got valid results back
-          if (!verificationResults || verificationResults.error) {
-            console.error("Verification failed:", verificationResults?.error || "Unknown error");
+          if (!autoResults || autoResults.error) {
+            console.error("Verification failed:", autoResults?.error || "Unknown error");
             showError("Verification tests failed to complete.");
             return;
           }
           
           // Now explicitly submit results to the server
           updateStatus("Submitting verification results...");
-          const verification = await submitCaptchaResults(verificationResults, challenge);
+          const verification = await submitAutoResults(autoResults, challenge);
           
           // Check if interactive challenge is required
           if (verification.requiresInteractiveChallenge && verification.interactiveChallenge) {
             // Handle interactive challenge
             updateStatus("Additional verification required...");
             const { interactiveChallenge } = verification;
-            const interactiveResult = await window.CaptchaSystem.startInteractiveVerify(challenge, interactiveChallenge, verificationResults);
+            const interactiveResult = await window.CaptchaSystem.startInteractiveVerify(interactiveChallenge);
             
             // Submit interactive challenge results
-            const finalVerification = await submitInteractiveCaptchaResults(
-              verificationResults,
-              interactiveResult,
-              challenge
+            const finalVerification = await submitInteractiveResults(
+              interactiveResult
             );
             
             // Handle final verification result
@@ -272,7 +270,7 @@
     }
     
     // Submit all test results back to server for verification
-    async function submitCaptchaResults(verificationResults, challenge) {
+    async function submitAutoResults(autoResults) {
       updateStatus("Completing verification...");
       
       // Get the stored request ID 
@@ -294,19 +292,10 @@
             'X-Request-ID': requestId
           },
           body: JSON.stringify({
-            // Challenge identification
-            challengeId: challenge.id,
-            initialRequestId: requestId,
             timestamp: Date.now(),
-            token: securityToken,
             
             // Results from tests
-            challengeSolution: {
-              testResults: verificationResults.testResults,
-              finalChainHash: verificationResults.finalChainHash,
-              completionTime: verificationResults.completionTime,
-              powResult: verificationResults.powResult
-            },
+            autoResults,
             
             // Standardized field name (was "currentEnvironment")
             environment: {
@@ -414,8 +403,8 @@
     }
     
     // Submit interactive challenge results
-    async function submitInteractiveCaptchaResults(verificationResults, interactiveResult, challenge) {
-      updateStatus("Submitting verification...");
+    async function submitInteractiveResults(interactiveResult) {
+      updateStatus("Submitting interactive verification...");
       
       // Get the stored request ID 
       const requestId = localStorage.getItem('captchaRequestId');
@@ -438,17 +427,7 @@
           body: JSON.stringify({
             // Challenge identification
             challengeId: challenge.id,
-            initialRequestId: requestId,
-            timestamp: Date.now(),
-            token: securityToken,
-            
-            // Results from automatic tests
-            challengeSolution: {
-              testResults: verificationResults.testResults,
-              finalChainHash: verificationResults.finalChainHash,
-              completionTime: verificationResults.completionTime,
-              powResult: verificationResults.powResult
-            },
+            timestamp: Date.now(),   
             
             // Results from interactive challenge
             interactiveChallenge: interactiveResult,

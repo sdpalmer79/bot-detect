@@ -3,7 +3,6 @@ const { evaluateTokenVerification, evaluateWebglFingerprinting } = require('./ve
 
 const MAX_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_CHALLENGE_AGE, 5 * 60 * 1000);
 const CHALLENGE_POW_DIFFICULTY = parseEnvNumber(process.env.CHALLENGE_POW_DIFFICULTY, 2);
-// Threshold for triggering interactive verification (0.0-1.0)
 const INTERACTIVE_CHALLENGE_THRESHOLD = parseEnvNumber(process.env.INTERACTIVE_CHALLENGE_THRESHOLD, 0.6);
 const MAX_INTERACTIVE_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_INTERACTIVE_CHALLENGE_AGE, 3 * 60 * 1000);
 
@@ -14,6 +13,18 @@ function parseEnvNumber(value, defaultValue) {
     
     const num = Number(value);
     return !isNaN(num) ? num : defaultValue;
+}
+
+class PseudoRandom {
+  constructor(seed) {
+    this.seed = seed % 2147483647;
+    if (this.seed <= 0) this.seed += 2147483646;
+  }
+  
+  next() {
+    this.seed = (this.seed * 16807) % 2147483647;
+    return this.seed / 2147483647;
+  }
 }
 
 function assignTestSuite() {
@@ -41,83 +52,84 @@ function createChallengeForRequest(suiteData, request) {
  * @param {Object} challenge - Original challenge data
  * @param {Object} suiteData - Test suite data
  * @param {number} botProbability - Bot probability assessment from automatic tests
- * @returns {Object} Interactive challenge configuration
+ * @returns {Object} Interactive challenge configuration (sent to client)
  */
 function createInteractiveChallenge(challenge, suiteData, botProbability) {
-  // Select appropriate interactive test based on bot probability
-  const selectedTest = selectInteractiveTest(botProbability, suiteData);
+  // Select appropriate interactive test and generate its parameters
+  const selectedTestConfig = selectInteractiveTest(botProbability, challenge, suiteData);
   
-  // Generate a deterministic but unique seed for this interactive challenge
-  // Combining parent challenge ID with timestamp ensures uniqueness while remaining deterministic
+  // Generate a unique ID for this interactive challenge instance
   const interactiveChallengeId = uuidv4();
-  const interactiveSeed = generateInteractiveSeed(challenge.id, interactiveChallengeId, selectedTest);
   
-  // Create the interactive challenge configuration
+  // Create the interactive challenge configuration to be sent to the client
+  // This includes the test ID (from the suite) and the client-specific parameters
   const interactiveChallenge = {
     id: interactiveChallengeId,
     parentChallengeId: challenge.id,
     timestamp: Date.now(),
     expiry: Date.now() + MAX_INTERACTIVE_CHALLENGE_AGE,
-    
-    // Add seed to parameters for client rendering
-    parameters: {
-      test: selectedTest,
-      seed: interactiveSeed,
-      difficulty: Math.min(Math.floor(probability * 10) + 1, 10)
-    }
+    ...selectedTestConfig
   };
   
+  console.log(`Created interactive challenge ${interactiveChallengeId} using test ${selectedTestConfig.testId}`);
   return interactiveChallenge;
 }
 
 /**
- * Generates a deterministic seed for interactive challenges
- * @param {string} parentId - Parent challenge ID
- * @param {string} interactiveId - Interactive challenge ID
- * @param {string} testType - Type of interactive test
- * @returns {string} - Deterministic seed string
- */
-function generateInteractiveSeed(parentId, interactiveId, testType) {
-  // Use the first 8 chars of both IDs + test type to ensure uniqueness
-  const seedBase = `${parentId.substring(0, 8)}-${interactiveId.substring(0, 8)}-${testType}`;
-  
-  // Create a deterministic hash of this string
-  const crypto = require('crypto');
-  const hash = crypto.createHash('sha256').update(seedBase).digest('hex');
-  
-  // Return a portion of the hash as the seed
-  return hash.substring(0, 16);
-}
-
-/**
- * Selects an appropriate interactive test based on bot probability
+ * Selects an appropriate interactive test, generates its parameters, and returns the configuration.
  * @param {number} botProbability - Bot probability from automatic tests (0-1)
- * @returns {string} Function name of selected interactive test
+ * @param {Object} challenge - The original challenge object (contains challengeId, suiteId)
+ * @param {Object} suiteData - Test suite data (contains suiteSeed, interactiveTests list)
+ * @returns {Object} Object containing { testId, originalTestId, clientParams, verificationParams }
  */
-function selectInteractiveTest(botProbability, suiteData) {
-  // Convert bot probability to difficulty level (1-5 scale)
-  const targetDifficulty = Math.min(Math.floor(botProbability * 10) + 1, 5);
-  let test;
-
-  // Select test by difficulty level
-  if (targetDifficulty <= 3) {
-    // Easy difficulty
-     test = suiteData.interactiveTests.find(test => test.difficultyLevel <= 3);
-  } else if (targetDifficulty <= 7) {
-    // Medium difficulty
-    test = suiteData.interactiveTests.find(test => test.difficultyLevel > 3 && test.difficultyLevel <= 7);
-  } else {
-    // Hard difficulty (8-10)
-    test = suiteData.interactiveTests.find(test => test.difficultyLevel > 7);
-  }
-
-  if (!test) {
-    throw new CaptchaError('NO_INTERACTIVE_TEST', {
-      message: `No interactive test available for the selected difficulty level in suite ${suiteData.suiteId}`,
-      details: { targetDifficulty, suiteData }
+function selectInteractiveTest(botProbability, challenge, suiteData) {
+  // 1. Select an interactive test from the suite
+  const availableInteractiveTests = suiteData.interactiveTests;
+  
+  if (!availableInteractiveTests || availableInteractiveTests.length === 0) {
+    throw new CaptchaError('NO_INTERACTIVE_TESTS_IN_SUITE', {
+      message: `No interactive tests found in suite ${suiteData.suiteId}`,
+      details: { suiteId: suiteData.suiteId }
     });
   }
-  return test.functionName;
+  
+  // Simple selection: Pick a random test from the available ones in the suite
+  // Use a deterministic seed based on challenge ID and suite seed for reproducibility
+  const selectionSeed = challenge.id + suiteData.suiteSeed;
+  const seedInt = parseInt(crypto.createHash('sha256').update(selectionSeed).digest('hex').substring(0, 8), 16);
+  const rng = new PseudoRandom(seedInt); // Assuming PseudoRandom class is defined elsewhere or imported
+  const selectedTestIndex = Math.floor(rng.next() * availableInteractiveTests.length);
+  const selectedTestInfo = availableInteractiveTests[selectedTestIndex]; // This is the info from suiteData.json
+
+  // Find the actual test module implementation using the originalId
+  const testModule = captchaTests.getTestById(selectedTestInfo.originalId);
+  if (!testModule) {
+      throw new CaptchaError('INTERACTIVE_TEST_MODULE_NOT_FOUND', {
+          message: `Test module implementation not found for ID: ${selectedTestInfo.originalId}`,
+          details: { testId: selectedTestInfo.originalId }
+      });
+  }
+
+  // 2. Call the test's generateChallengeParams function
+  const targetDifficulty = Math.min(Math.floor(botProbability * 5) + 1, 5); // Difficulty 1-5 based on probability
+  
+  const options = {
+    challengeId: challenge.id, // Pass the original challenge ID
+    difficultyLevel: targetDifficulty,
+    suiteId: suiteData.suiteId,
+    suiteData: suiteData // Pass the full suite data for context if needed
+  };
+  
+  // Generate the parameters using the test module's function
+  const generatedParams = testModule.generateChallengeParams(options);
+
+  // 3. Return the test ID (from the suite instance) and the generated params
+  return {
+    testId: selectedTestInfo.id, // Use the unique ID assigned in the suite
+    originalTestId: selectedTestInfo.originalId, // Keep original ID for reference
+    clientParams: generatedParams.clientParams,
+    verificationParams: generatedParams.verificationParams // Keep verification params separate
+  };
 }
 
 function getRequestFingerprint(request) {
@@ -190,45 +202,78 @@ function verifyProofOfWork(submission) {
 }
 
 /**
- * Evaluates all automatic tests in the submission
+ * Evaluates all automatic tests in the submission using the test interface
  * @param {Object} submission - User submission data
  * @param {Object} challenge - Challenge data sent to client
  * @param {Object} suiteData - Suite configuration data
- * @returns {Map} Map of test evaluations
+ * @returns {Map} Map of test evaluations keyed by original test ID
  */
 async function evaluateAutomaticTests(submission, challenge, suiteData) {
-  console.log('Evaluating automatic test results...');
+  console.log('Evaluating automatic test results using test interface...');
   const testEvaluations = new Map();
   
-  // Filter for real tests (not dummy tests)
-  for (const test of suiteData.tests.filter(test => test.isRealTest)) {
-    console.log(`Evaluating test ${test.originalId}...`);
+  // Filter for real automatic tests (not dummy tests)
+  const realAutomaticTests = suiteData.tests.filter(test => test.isRealTest && !test.isInteractive);
+
+  for (const testInfo of realAutomaticTests) {
+    console.log(`Evaluating test ${testInfo.originalId} (ID: ${testInfo.id})...`);
     
-    // Check if the test result exists
-    if (!submission.challengeSolution.testResults || 
-        !submission.challengeSolution.testResults.hasOwnProperty(test.id)) {
+    // Find the actual test module implementation
+    const testModule = captchaTests.getTestById(testInfo.originalId);
+    if (!testModule) {
+      throw new CaptchaError('TEST_MODULE_NOT_FOUND', {
+        message: `Test module implementation not found for ID: ${testInfo.originalId}`,
+        details: { testId: testInfo.originalId }
+      });
+    }
+
+    // Check if the verifyResult function exists
+    if (typeof testModule.verifyResult !== 'function') {
+        throw new CaptchaError('VERIFY_FUNCTION_MISSING', {
+            message: `verifyResult function not found for test module: ${testInfo.originalId}`,
+            details: { testId: testInfo.originalId }
+        });
+    }
+
+    // Check if the test result exists in the submission
+    if (!submission.challengeSolution?.testResults || 
+        !submission.challengeSolution.testResults.hasOwnProperty(testInfo.id)) {
       throw new CaptchaError('MISSING_TEST_RESULT', {
-        message: `Missing test result for test ${test.originalId} (ID: ${test.id})`,
+        message: `Missing test result for test ${testInfo.originalId} (ID: ${testInfo.id})`,
         details: {
-          testId: test.id,
-          originalTestId: test.originalId,
-          availableResults: Object.keys(submission.challengeSolution.testResults || {})
+          testId: testInfo.id,
+          originalTestId: testInfo.originalId,
+          availableResults: Object.keys(submission.challengeSolution?.testResults || {})
         }
       });
     }
 
-    const result = submission.challengeSolution.testResults[test.id];
+    const result = submission.challengeSolution.testResults[testInfo.id];
+    
+    // Retrieve the parameters used for this specific test instance from suiteData
+    // These act as the 'verificationParams' for automatic tests in this context
+    const verificationParams = testInfo.paramValues || {}; 
 
-    switch (test.originalId) {
-      case 'token_verification':
-        testEvaluations.set('token_verification', await evaluateTokenVerification(result, challenge, suiteData));
-        break;
-      case 'webgl_fingerprinting':
-        testEvaluations.set('webgl_fingerprinting', await evaluateWebglFingerprinting(result));
-        break;
-      // Additional test evaluations can be added here
-      default:
-        console.log(`Unknown test type: ${test.originalId}`);
+    try {
+      // Call the test module's verifyResult function
+      // Following the interface: verifyResult(result, challenge, verificationParams)
+      const evaluation = await testModule.verifyResult(result, challenge, verificationParams);
+      
+      // Store the evaluation result using the original test ID as the key
+      testEvaluations.set(testInfo.originalId, evaluation);
+      console.log(`Test ${testInfo.originalId} evaluation complete. Valid: ${evaluation.valid}, BotProb: ${evaluation.botProbability?.toFixed(3)}`);
+
+    } catch (error) {
+        console.error(`Error verifying test ${testInfo.originalId}:`, error);
+        // Store an error evaluation if verification fails
+        testEvaluations.set(testInfo.originalId, {
+            valid: false,
+            botProbability: 0.95, // High probability on error
+            confidence: 0.5,
+            details: {
+                error: `Verification failed: ${error.message}`
+            }
+        });
     }
   }
   
@@ -517,7 +562,5 @@ class CaptchaError extends Error {
 
 module.exports = { 
   createChallengeForRequest, 
-  verifySubmission,
-  createInteractiveChallenge,
-  selectInteractiveTest
+  verifySubmission
 };

@@ -588,7 +588,7 @@ window.CaptchaSystem = {
   },
   
   // Method to activate interactive challenge when needed
-  startInteractiveVerify: async function(challenge, interactiveChallenge, autoVerificationResults) {
+  startInteractiveVerify: async function(interactiveChallenge) {
     console.log("Starting interactive challenge");
     
     try {

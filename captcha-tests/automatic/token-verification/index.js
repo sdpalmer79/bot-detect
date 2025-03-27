@@ -246,14 +246,6 @@ module.exports = {
     };
   },
   
-  /**
-   * Generates challenge-specific parameters (none needed for token verification)
-   * @returns {Object} Challenge-specific parameters
-   */
-  generateChallengeParams() {
-    // No challenge-specific params needed for token verification
-    return {};
-  },
   
   /**
    * Verifies test results against expected values

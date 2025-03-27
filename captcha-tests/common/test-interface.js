@@ -4,7 +4,7 @@
  * Each test module is responsible for:
  * 1. Providing client-side test code with parameter placeholders
  * 2. Defining required parameters and their sources
- * 3. Generating challenge-specific parameters when needed
+ * 3. Generating challenge-specific parameters (client and verification)
  * 4. Verifying client-submitted test results
  */
 
@@ -14,7 +14,6 @@
  * @property {string} name - Human-readable name
  * @property {'automatic'|'interactive'} type - Test type
  * @property {string} category - Category for grouping (e.g., "token", "webgl")
- * @property {number} [difficultyLevel] - For interactive tests (1-5)
  */
 
 /**
@@ -42,6 +41,13 @@
  */
 
 /**
+ * @typedef {Object} ChallengeParams
+ * @property {string} challengeId - Challenge identifier
+ * @property {Object} clientParams - Parameters sent to the client-side test
+ * @property {Object} verificationParams - Parameters used for server-side verification
+ */
+
+/**
  * @typedef {Object} VerificationResult
  * @property {boolean} valid - Whether the test was passed successfully
  * @property {number} botProbability - Estimated bot probability (0-1)
@@ -62,8 +68,7 @@ module.exports = {
       id: "test_id",                // Implement in actual test
       name: "Test Name",            // Implement in actual test
       type: "automatic",            // "automatic" or "interactive"
-      category: "category",         // Implement in actual test
-      // difficultyLevel: 3,        // Only for interactive tests
+      category: "category"          // Implement in actual test
     },
   
     /**
@@ -94,22 +99,28 @@ module.exports = {
   
     /**
      * Generates challenge-specific parameters based on difficulty/context
+     * Returns a standardized object with separate client and verification parameters
+     * 
      * @param {ChallengeOptions} options - Context for parameter generation
-     * @returns {Object} Challenge-specific parameters
+     * @returns {ChallengeParams} Object containing client parameters and verification parameters
      */
     generateChallengeParams(options) {
-      // Default implementation (no special params)
-      return {};
+      // Default implementation with empty parameters
+      return {
+        challengeId: options.challengeId,
+        clientParams: {},      // Parameters sent to client-side test
+        verificationParams: {} // Parameters used for server-side verification only
+      };
     },
   
     /**
      * Verifies test results against expected values
      * @param {Object} result - Client-submitted test result
-     * @param {Object} challenge - Original challenge parameters
-     * @param {Object} testParams - Test parameters from suite
+     * @param {Object} challenge - Challenge object containing clientParams
+     * @param {Object} verificationParams - Verification parameters from generateChallengeParams
      * @returns {VerificationResult} Verification result with standardized format
      */
-    verifyResult(result, challenge, testParams) {
+    verifyResult(result, challenge, verificationParams) {
       throw new Error('verifyResult must be implemented by test module');
     }
 };
