@@ -3,10 +3,16 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { buildSuites } = require('./build-test-suite/src/build');
-const { assignTestSuite, createChallengeForRequest, getAndVerifyChallenge, verifySubmission, createInteractiveChallenge } = require('./challengeUtils');
+const { assignTestSuite, createChallengeForRequest, getAndVerifyChallenge, verifyAutoTests, createInteractiveChallenge } = require('./challengeUtils');
 
 const suiteCache = new Map();
 const challengeCache = new Map();
+
+// Define baseSuiteDir needed for serving suite files
+const baseSuiteDir = process.env.SUITES_BASE_DIR || path.join(os.tmpdir(), 'captcha-suites');
+if (!fs.existsSync(baseSuiteDir)) {
+  fs.mkdirSync(baseSuiteDir, { recursive: true });
+}
 
 // Create debug server
 async function startDebugServer(port = 3000) {
@@ -14,7 +20,7 @@ async function startDebugServer(port = 3000) {
   
   // Build a single suite for testing
   console.log('Building test suite...');
-  const suites = await buildSuites(1);
+  const suites = await buildSuites(1, baseSuiteDir);
   const testSuite = suites[0];
   console.log(`Created test suite: ${testSuite.suiteId}`);
   
@@ -58,21 +64,55 @@ async function startDebugServer(port = 3000) {
     console.log('Request headers:', req.headers);
     console.log('Request body:', JSON.stringify(req.body, null, 2));
     
-    const suiteData = assignTestSuite(suiteCache);
-    console.log('Selected suite data for challenge:', suiteData);
+    try {
+      const selectedSuiteData = assignTestSuite(suiteCache);
+      console.log('Selected suite data for challenge:', selectedSuiteData.suiteId);
 
-    const challenge = createChallengeForRequest(suiteData);
-    challengeCache.set(challenge.challengeId, challenge);
-    console.log('Sending challenge:', challenge);
-    res.json(challenge);
+      const challenge = createChallengeForRequest(selectedSuiteData, req);
+      challengeCache.set(challenge.id, challenge); // Use challenge.id as key
+      console.log('Sending challenge:', challenge);
+      res.json(challenge);
+    } catch (error) {
+      console.error("Error requesting challenge:", error);
+      res.status(500).json({ error: 'Failed to create challenge' });
+    }
   });
+
   
-  // Serve suite file
   app.get('/suite/:suiteId', (req, res) => {
-    if (req.params.suiteId === testSuite.suiteId) {
-      res.sendFile(suiteJsPath);
-    } else {
-      res.status(404).send('suite not found');
+    try {
+      // 1. Verify the challenge token from the header
+      const challenge = getAndVerifyChallenge(req, challengeCache);
+      
+      // 2. Check if the requested suiteId matches the one in the challenge
+      if (req.params.suiteId === challenge.suiteId) {
+        // 3. Check if the suite file exists (using the path from the build step)
+        const requestedSuiteJsPath = path.join(baseSuiteDir, req.params.suiteId, 'test-suite.src.js'); // Adjust if using obfuscated version
+        
+        if (fs.existsSync(requestedSuiteJsPath)) {
+          console.log(`Serving suite file for valid challenge ${challenge.id}: ${requestedSuiteJsPath}`);
+          res.sendFile(requestedSuiteJsPath);
+        } else {
+          console.error(`Suite file not found for suiteId ${req.params.suiteId} at ${requestedSuiteJsPath}`);
+          res.status(404).send('Suite file not found.');
+        }
+      } else {
+        console.warn(`Suite ID mismatch for challenge ${challenge.id}. Requested: ${req.params.suiteId}, Expected: ${challenge.suiteId}`);
+        res.status(403).send('Forbidden: Suite ID mismatch.');
+      }
+    } catch (error) {
+      console.error("Error serving suite file:", error);
+      if (error.code) { // Check if it's a CaptchaError
+          res.status(400).json({ 
+              errorCode: error.code, 
+              message: error.message
+          });
+      } else {
+          res.status(500).json({ 
+              errorCode: 'SERVER_ERROR', 
+              message: 'Internal server error serving suite file.' 
+          });
+      }
     }
   });
 
@@ -92,10 +132,19 @@ app.post('/api/verify-captcha', async (req, res) => {
     }
 
     // 3. Perform the verification using the validated challenge and suite data
-    const verification = await verifySubmission(req.body, challenge, suiteData);
-    
-    console.log('Verification result:', verification);
-    res.json(verification);
+    const result = await verifyAutoTests(req.body, challenge, suiteData);
+   //save relevant results to the challenge object
+   //if we need use interactive challenge update max challenge time in the challenge.
+   //save the interactive challenge to the interactive challenge cahce and updae the challenge to reference the correct interactive challenge.
+   //add checks to prevent challenge being reused. for example once the challenge is served it cannot be served again.and once the auto tests complete they cannot be resubbmitted
+   //complete the verify-interactive-captcha endpoint
+    console.log('Verification result:', result);
+    res.json({
+      valid: result.valid,
+      interactiveChallenge: {
+        testId: result.interactiveChallenge.testId,
+        params: result.interactiveChallenge.clientParams,
+    }});
 
   } catch (error) {
     console.error("Verification endpoint error:", error);
@@ -167,7 +216,7 @@ app.post('/api/verify-interactive-captcha', async (req, res) => {
     }
   }
 });
-  
+
   // Copy frontend files to debug directory
   copyFrontendFiles(path.join(__dirname, 'captcha-site', 'public'), debugDir);
   

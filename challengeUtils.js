@@ -4,7 +4,6 @@ const captchaTests = require('./captcha-tests');
 const MAX_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_CHALLENGE_AGE, 5 * 60 * 1000);
 const CHALLENGE_POW_DIFFICULTY = parseEnvNumber(process.env.CHALLENGE_POW_DIFFICULTY, 2);
 const INTERACTIVE_CHALLENGE_THRESHOLD = parseEnvNumber(process.env.INTERACTIVE_CHALLENGE_THRESHOLD, 0.6);
-const MAX_INTERACTIVE_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_INTERACTIVE_CHALLENGE_AGE, 3 * 60 * 1000);
 const CHALLENGE_ID_HEADER = 'x-challenge-id';
 
 function parseEnvNumber(value, defaultValue) {
@@ -163,7 +162,6 @@ function createInteractiveChallenge(challenge, suiteData, botProbability) {
     id: interactiveChallengeId,
     parentChallengeId: challenge.id,
     timestamp: Date.now(),
-    expiry: Date.now() + MAX_INTERACTIVE_CHALLENGE_AGE,
     ...selectedTestConfig
   };
   
@@ -239,7 +237,7 @@ function getRequestFingerprint(request) {
  * @param {Object} suiteData - Suite configuration data
  * @returns {Object} Verification results with standardized format
  */
-async function verifySubmission(submission, challenge, suiteData) {
+async function verifyAutoTests(submission, challenge, suiteData) {
   try {
     
     // Verify proof of work
@@ -252,8 +250,14 @@ async function verifySubmission(submission, challenge, suiteData) {
     const totalBotProbability = calculateCombinedBotProbability(testEvaluations);
     console.log(`Total bot probability from automatic tests: ${totalBotProbability.toFixed(3)}`);
     
-    // Return results based on three possible scenarios
-    return determineVerificationResult(submission, challenge, suiteData, totalBotProbability, testEvaluations);
+    // Determine if interactive challenge is needed
+    const result = determineAutoTestsResult(challenge, suiteData, totalBotProbability);
+    return {
+      valid: result.valid,
+      testResults: testEvaluations,
+      botProbability: totalBotProbability,
+      interactiveChallenge: result.interactiveChallenge || null
+    }
   } catch (error) {
     return handleVerificationError(error);
   }
@@ -376,44 +380,9 @@ function calculateCombinedBotProbability(testEvaluations) {
 /**
  * Determine the verification result based on the bot probability and submission
  */
-function determineVerificationResult(submission, challenge, suiteData, totalBotProbability, testEvaluations) {
-  // Base result structure with automatic test results
-  const baseResult = {
-    botProbability: totalBotProbability,
-    details: {
-      automaticTestResults: Object.fromEntries(testEvaluations)
-    }
-  };
-
-  // CASE 1: Interactive challenge already submitted
-  if (submission.interactiveChallenge) {
-    console.log('Interactive challenge solution submitted, evaluating...');
-    
-    // Evaluate the interactive challenge
-    const interactiveResult = evaluateInteractiveChallenge(
-      submission.interactiveChallenge,
-      challenge
-    );
-    
-    // Adjust final bot probability based on interactive challenge results
-    const finalBotProbability = calculateFinalBotProbability(
-      totalBotProbability,
-      interactiveResult
-    );
-    
-    return {
-      ...baseResult,
-      valid: finalBotProbability < 0.4, // Threshold for accepting as human
-      botProbability: finalBotProbability,
-      requiresInteractiveChallenge: false, // Already completed
-      details: {
-        ...baseResult.details,
-        interactiveTestResult: interactiveResult
-      }
-    };
-  }
+function determineAutoTestsResult(challenge, suiteData, totalBotProbability) {
   
-  // CASE 2: Bot probability exceeds threshold, need interactive challenge
+  // Bot probability exceeds threshold, need interactive challenge
   if (totalBotProbability >= INTERACTIVE_CHALLENGE_THRESHOLD) {
     console.log('Bot probability threshold exceeded, interactive challenge required');
     
@@ -425,18 +394,14 @@ function determineVerificationResult(submission, challenge, suiteData, totalBotP
     );
     
     return {
-      ...baseResult,
       valid: false,
-      requiresInteractiveChallenge: true,
-      interactiveChallenge: interactiveChallenge
+      interactiveChallenge
     };
   }
   
-  // CASE 3: Bot probability below threshold, verification successful
+  // Bot probability below threshold, verification successful
   return {
-    ...baseResult,
-    valid: true,
-    requiresInteractiveChallenge: false
+    valid: true
   };
 }
 
@@ -489,5 +454,5 @@ module.exports = {
   assignTestSuite,
   createChallengeForRequest,
   getAndVerifyChallenge,
-  verifySubmission
+  verifyAutoTests
 };

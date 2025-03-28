@@ -6,16 +6,19 @@ const path = require('path');
 const os = require('os');
 
 // Use environment variable or create a temp directory if not specified
-const baseSuiteDir = process.env.SUITES_BASE_DIR || path.join(os.tmpdir(), 'captcha-suites');
+const baseSuiteDirDefault = process.env.SUITES_BASE_DIR || path.join(os.tmpdir(), 'captcha-suites');
 
-// Ensure the directory exists
-if (!fs.existsSync(baseSuiteDir)) {
-  fs.mkdirSync(baseSuiteDir, { recursive: true });
-}
-
-
-async function buildSuites(count = 1) {
+async function buildSuites(count = 1, baseSuiteDir) {
   console.log(`Building ${count} CAPTCHA suites...`);
+
+  // Ensure the directory exists
+  if (!baseSuiteDir) {
+    baseSuiteDir = baseSuiteDirDefault;
+    if (!fs.existsSync(baseSuiteDirDefault)) {
+      fs.mkdirSync(baseSuiteDirDefault, { recursive: true });
+    }
+  }
+
   console.log(`Using suite directory: ${baseSuiteDir}`);
   
   const results = [];
