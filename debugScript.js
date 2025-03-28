@@ -3,7 +3,10 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { buildSuites } = require('./build-test-suite/src/build');
-const { createChallengeForRequest, verifySubmission, createInteractiveChallenge } = require('./challengeUtils');
+const { assignTestSuite, createChallengeForRequest, getAndVerifyChallenge, verifySubmission, createInteractiveChallenge } = require('./challengeUtils');
+
+const suiteCache = new Map();
+const challengeCache = new Map();
 
 // Create debug server
 async function startDebugServer(port = 3000) {
@@ -22,7 +25,7 @@ async function startDebugServer(port = 3000) {
   
   // Read suite data
   const suiteData = JSON.parse(fs.readFileSync(suiteDataPath, 'utf-8'));
-  const challenge = createChallengeForRequest(suiteData);
+  suiteCache.set(testSuite.suiteId, suiteData);
   
   // Setup debug directory
   const debugDir = path.join(__dirname, 'debug');
@@ -46,6 +49,24 @@ async function startDebugServer(port = 3000) {
   // Serve static files from debug directory
   app.use(express.static(debugDir));
   
+  
+  // API endpoint to request a challenge
+  app.post('/api/request-challenge', (req, res) => {
+    
+    // Log request details
+    console.log('Challenge requested:');
+    console.log('Request headers:', req.headers);
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    
+    const suiteData = assignTestSuite(suiteCache);
+    console.log('Selected suite data for challenge:', suiteData);
+
+    const challenge = createChallengeForRequest(suiteData);
+    challengeCache.set(challenge.challengeId, challenge);
+    console.log('Sending challenge:', challenge);
+    res.json(challenge);
+  });
+  
   // Serve suite file
   app.get('/suite/:suiteId', (req, res) => {
     if (req.params.suiteId === testSuite.suiteId) {
@@ -54,70 +75,98 @@ async function startDebugServer(port = 3000) {
       res.status(404).send('suite not found');
     }
   });
-  
-  // API endpoint to request a challenge
-  app.post('/api/request-challenge', (req, res) => {
-    console.log('Challenge requested:');
-    console.log(JSON.stringify(req.body, null, 2));
-    
-    // Log headers for debugging
-    console.log('Request headers:', req.headers);
-    console.log('Sending challenge:', challenge);
-    res.json(challenge);
-  });
-  
+
   // API endpoint to verify captcha results
-  app.post('/api/verify-captcha', async (req, res) => {
-    console.log('Verification received:');
-    console.log(JSON.stringify(req.body, null, 2));
+app.post('/api/verify-captcha', async (req, res) => {
+  console.log('Verification received:');
+  console.log(JSON.stringify(req.body, null, 2));
+  
+  try {
+    // 1. Get and validate the challenge using the token from the header
+    const challenge = getAndVerifyChallenge(req, challengeCache); 
     
-    // For debug server, show detailed verification process
+    // 2. Retrieve the corresponding suite data (assuming suiteId is in challenge)
+    const suiteData = suiteCache.get(challenge.suiteId);
+    if (!suiteData) {
+      throw new Error(`Suite data not found for suite ID: ${challenge.suiteId}`); // Or use CaptchaError
+    }
+
+    // 3. Perform the verification using the validated challenge and suite data
     const verification = await verifySubmission(req.body, challenge, suiteData);
     
     console.log('Verification result:', verification);
-    
-    // Note: With the new architecture, we no longer need to create a separate
-    // module for interactive challenges as they're included in the main suite
-    
     res.json(verification);
-  });
-  
-  // API endpoint to verify interactive captcha results
-  app.post('/api/verify-interactive-captcha', async (req, res) => {
-    console.log('Interactive verification received:');
-    console.log(JSON.stringify(req.body, null, 2));
-    
-    // Get both automatic and interactive challenge results
-    const { challengeSolution, interactiveChallenge } = req.body;
-    
-    // First verify the automatic tests
-    const autoVerification = await verifySubmission(req.body, challenge, suiteData);
-    
-    // Update verification with interactive challenge results
-    if (interactiveChallenge) {
-      // In a real implementation, this would analyze the interaction patterns
-      // For debug, simply check if the challenge was successful
-      const interactiveSuccess = interactiveChallenge.success === true;
-      
-      // Override verification result based on interactive challenge
-      autoVerification.valid = interactiveSuccess;
-      autoVerification.requiresInteractiveChallenge = false;
-      autoVerification.interactiveVerified = true;
-      
-      // Add interactive challenge details
-      autoVerification.details = autoVerification.details || {};
-      autoVerification.details.interactiveChallenge = {
-        success: interactiveSuccess,
-        type: interactiveChallenge.challengeType || 'pattern_completion',
-        completionTime: interactiveChallenge.completionTime,
-        interactionCount: (interactiveChallenge.userInteractions || []).length
-      };
+
+  } catch (error) {
+    console.error("Verification endpoint error:", error);
+    // Send appropriate error response based on CaptchaError or generic error
+    if (error.code) { // Check if it's a CaptchaError
+        res.status(400).json({ 
+            valid: false, 
+            errorCode: error.code, 
+            message: error.message,
+            details: error.details 
+        });
+    } else {
+        res.status(500).json({ 
+            valid: false, 
+            errorCode: 'SERVER_ERROR', 
+            message: 'Internal server error during verification.' 
+        });
     }
-    
-    console.log('Interactive verification result:', autoVerification);
-    
-    res.json(autoVerification);
-  });
+  }
+});
+
+// API endpoint to verify interactive captcha results
+app.post('/api/verify-interactive-captcha', async (req, res) => {
+  console.log('Interactive verification received:');
+  console.log(JSON.stringify(req.body, null, 2));
+
+  try {
+    // 1. Get and validate the challenge using the token from the header
+    // Note: This assumes the interactive submission also includes the original challenge ID header
+    const challenge = getAndVerifyChallenge(req, challengeCache); 
+
+    // 2. Retrieve the corresponding suite data
+    const suiteData = suiteCache.get(challenge.suiteId);
+     if (!suiteData) {
+      throw new Error(`Suite data not found for suite ID: ${challenge.suiteId}`); // Or use CaptchaError
+    }
+
+    // 3. TODO: Implement specific interactive verification logic
+    // This will likely involve:
+    //    a. Retrieving the stored verificationParams for the interactive challenge ID (from req.body.interactiveChallenge.id)
+    //    b. Finding the correct interactive test module using suiteData
+    //    c. Calling the test module's verifyResult with the submitted interactive solution and the stored verificationParams.
+    //    d. Combining the automatic and interactive results (similar to how it's done in challengeUtils.determineVerificationResult)
+
+    // Placeholder for interactive verification result
+    const verification = { 
+        valid: true, // Replace with actual interactive verification logic
+        message: "Interactive verification placeholder - needs implementation" 
+    }; 
+
+    console.log('Interactive verification result:', verification);
+    res.json(verification);
+
+  } catch (error) {
+     console.error("Interactive verification endpoint error:", error);
+     if (error.code) { // Check if it's a CaptchaError
+        res.status(400).json({ 
+            valid: false, 
+            errorCode: error.code, 
+            message: error.message,
+            details: error.details 
+        });
+    } else {
+        res.status(500).json({ 
+            valid: false, 
+            errorCode: 'SERVER_ERROR', 
+            message: 'Internal server error during interactive verification.' 
+        });
+    }
+  }
+});
   
   // Copy frontend files to debug directory
   copyFrontendFiles(path.join(__dirname, 'captcha-site', 'public'), debugDir);

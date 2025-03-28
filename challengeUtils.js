@@ -1,10 +1,11 @@
 const { v4: uuidv4 } = require('uuid');
-const { evaluateTokenVerification, evaluateWebglFingerprinting } = require('./verifyUtils');
+const captchaTests = require('./captcha-tests');
 
 const MAX_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_CHALLENGE_AGE, 5 * 60 * 1000);
 const CHALLENGE_POW_DIFFICULTY = parseEnvNumber(process.env.CHALLENGE_POW_DIFFICULTY, 2);
 const INTERACTIVE_CHALLENGE_THRESHOLD = parseEnvNumber(process.env.INTERACTIVE_CHALLENGE_THRESHOLD, 0.6);
 const MAX_INTERACTIVE_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_INTERACTIVE_CHALLENGE_AGE, 3 * 60 * 1000);
+const CHALLENGE_ID_HEADER = 'x-challenge-id';
 
 function parseEnvNumber(value, defaultValue) {
     if (value === undefined || value === null || value === '') {
@@ -27,23 +28,118 @@ class PseudoRandom {
   }
 }
 
-function assignTestSuite() {
-    // To be implemented
+// Custom error class for CAPTCHA validation
+class CaptchaError extends Error {
+  constructor(code, {message, details}) {
+    super(message);
+    this.code = code;
+    this.details = details;
+  }
+}
+
+/**
+ * Selects a random test suite from the available suites map.
+ * @param {Map<string, Object>} suitesMap - A Map where keys are suite IDs and values are suite data objects.
+ * @returns {Object} The selected suite data object.
+ * @throws {CaptchaError} If no suites are available in the map.
+ */
+function assignTestSuite(suitesMap) {
+  if (!suitesMap || suitesMap.size === 0) {
+      throw new CaptchaError('NO_SUITES_AVAILABLE', {
+          message: 'No CAPTCHA test suites are currently loaded or available.',
+          details: {}
+      });
+  }
+
+  // Get an array of suite IDs (keys of the map)
+  const suiteIds = Array.from(suitesMap.keys());
+
+  // Select a random index
+  const randomIndex = Math.floor(Math.random() * suiteIds.length);
+  const selectedSuiteId = suiteIds[randomIndex];
+
+  // Retrieve and return the suite data for the selected ID
+  const selectedSuiteData = suitesMap.get(selectedSuiteId);
+
+  if (!selectedSuiteData) {
+      // This should ideally not happen if the map is consistent
+      throw new CaptchaError('SUITE_DATA_MISSING', {
+          message: `Suite data not found for randomly selected ID: ${selectedSuiteId}`,
+          details: { selectedSuiteId }
+      });
+  }
+
+  console.log(`Assigned test suite: ${selectedSuiteId}`);
+  return selectedSuiteData;
 }
 
 function createChallengeForRequest(suiteData, request) {
-  // Create challenge id when saving to db
-  const challengeId = uuidv4();  
+  // Use challengeId as the token
+  const challengeId = uuidv4(); 
   const challenge = {
-    id: challengeId,
+    id: challengeId, // This is the token
     suiteId: suiteData.suiteId,
     suiteUrl: `/suite/${suiteData.suiteId}`,
     timestamp: Date.now(),
-    token: getToken(),
     powDifficulty: CHALLENGE_POW_DIFFICULTY,
-    powPrefix: `${challengeId.substring(0, 8)}-${suiteData.suiteId.substring(0, 8)}`,
-    expiry: Date.now() + MAX_CHALLENGE_AGE // 5 minutes
+    // Ensure powPrefix uses the generated challengeId
+    powPrefix: `${challengeId.substring(0, 8)}-${suiteData.suiteId.substring(0, 8)}`, 
+    expiry: Date.now() + MAX_CHALLENGE_AGE // Explicit expiry time
   };
+  return challenge;
+}
+
+/**
+ * Retrieves the challenge ID from request headers and validates the challenge.
+ * @param {Object} req - The Express request object.
+ * @param {Map<string, Object>} challengeCache - The cache storing active challenges.
+ * @returns {Object} The validated challenge object.
+ * @throws {CaptchaError} If token is missing, challenge not found, or challenge expired.
+ */
+function getAndVerifyChallenge(req, challengeCache) {
+  // 1. Fetch the token (challenge ID) from the header
+  const challengeId = req.headers[CHALLENGE_ID_HEADER];
+  
+  if (!challengeId) {
+    throw new CaptchaError('MISSING_CHALLENGE_ID', {
+      message: `Missing challenge ID in header '${CHALLENGE_ID_HEADER}'.`,
+      details: { headers: req.headers }
+    });
+  }
+  
+  // 2. Fetch the challenge from the cache
+  const challenge = challengeCache.get(challengeId);
+  
+  if (!challenge) {
+    throw new CaptchaError('CHALLENGE_NOT_FOUND', {
+      message: `Challenge with ID '${challengeId}' not found in cache. It might have expired or never existed.`,
+      details: { challengeId }
+    });
+  }
+  
+  // 3. Verify that the challenge age has not expired
+  const challengeAge = Date.now() - challenge.timestamp;
+  const maxAge = challenge.expiry ? (challenge.expiry - challenge.timestamp) : MAX_CHALLENGE_AGE; // Use expiry if available, else default
+  
+  if (challengeAge > maxAge) {
+    // Optionally remove expired challenge from cache
+    challengeCache.delete(challengeId);
+    
+    throw new CaptchaError('CHALLENGE_EXPIRED', {
+      message: `Challenge '${challengeId}' has expired.`,
+      details: { 
+        challengeId, 
+        timestamp: challenge.timestamp, 
+        expiry: challenge.expiry, 
+        now: Date.now(), 
+        age: challengeAge, 
+        maxAge 
+      }
+    });
+  }
+  
+  // 4. Return the challenge if successful
+  console.log(`Challenge ${challengeId} retrieved and validated successfully.`);
   return challenge;
 }
 
@@ -136,11 +232,6 @@ function getRequestFingerprint(request) {
   // To be implemented
 }
 
-function getToken(){
-  // TO-DO create token
-  return 'token-1234';
-}
-
 /**
  * Verifies CAPTCHA submission results
  * @param {Object} submission - User submission data
@@ -150,8 +241,6 @@ function getToken(){
  */
 async function verifySubmission(submission, challenge, suiteData) {
   try {
-    // Verify challenge is still valid
-    verifyExpiration(challenge);
     
     // Verify proof of work
     verifyProofOfWork(submission);
@@ -167,20 +256,6 @@ async function verifySubmission(submission, challenge, suiteData) {
     return determineVerificationResult(submission, challenge, suiteData, totalBotProbability, testEvaluations);
   } catch (error) {
     return handleVerificationError(error);
-  }
-}
-
-/**
- * Verifies if challenge has not expired
- */
-function verifyExpiration(challenge) {
-  console.log('Verifying challenge expiration...');
-  const maxAge = MAX_CHALLENGE_AGE;
-  const challengeAge = Date.now() - challenge.timestamp;
-  const challengeExpired = challengeAge > maxAge;
-  
-  if (challengeExpired) {
-    throw new CaptchaError('CHALLENGE_EXPIRED', { message: 'Challenge expired', details: { challenge, maxAge, challengeAge, challengeExpired }} );
   }
 }
 
@@ -391,147 +466,6 @@ function handleVerificationError(error) {
   };
 }
 
-/**
- * Evaluates an interactive challenge solution
- * @param {Object} interactiveChallenge - Interactive challenge solution
- * @param {Object} originalChallenge - Original challenge data
- * @returns {Object} Evaluation results for the interactive challenge
- */
-function evaluateInteractiveChallenge(interactiveChallenge, originalChallenge) {
-  // Check if the challenge was successful
-  const success = interactiveChallenge.success === true;
-  
-  // Calculate bot probability based on interaction patterns
-  let botProbability = 0.5; // Default starting value
-  
-  // Check if the correct solution was selected
-  if (success) {
-    botProbability -= 0.3; // Reduce probability for correct solution
-  } else {
-    botProbability += 0.3; // Increase probability for incorrect solution
-  }
-  
-  // Analyze interaction data for bot patterns
-  if (interactiveChallenge.userInteractions && 
-      interactiveChallenge.userInteractions.length > 0) {
-    
-    // Check for natural mouse movement patterns
-    const mouseMovements = interactiveChallenge.userInteractions.filter(
-      i => i.type === 'mousemove'
-    );
-    
-    // Human interactions typically have many mouse movements
-    if (mouseMovements.length < 5) {
-      botProbability += 0.2; // Few mouse movements suggest automation
-    } else {
-      botProbability -= 0.1; // Natural amount of mouse movements
-    }
-    
-    // Check for hover behavior before selection
-    const hasHoverBeforeSelection = mouseMovements.some(
-      m => m.timestamp < interactiveChallenge.completionTime - 500
-    );
-    
-    if (hasHoverBeforeSelection) {
-      botProbability -= 0.1; // Hovering is a natural human behavior
-    }
-    
-    // Check completion time - too fast suggests automation
-    if (interactiveChallenge.completionTime < 1000) {
-      botProbability += 0.2; // Too fast, likely bot
-    } else if (interactiveChallenge.completionTime > 10000) {
-      botProbability += 0.1; // Too slow, could be a bot taking time deliberately
-    } else {
-      botProbability -= 0.1; // Natural time range
-    }
-  } else {
-    // No interaction data is highly suspicious
-    botProbability += 0.4;
-  }
-  
-  // Cap probability between 0 and 1
-  botProbability = Math.min(Math.max(botProbability, 0), 1);
-  
-  return {
-    success,
-    botProbability,
-    confidence: 0.8, // Interactive challenges have high confidence
-    interactionQuality: calculateInteractionQuality(interactiveChallenge),
-    completionTime: interactiveChallenge.completionTime
-  };
-}
-
-/**
- * Calculates the quality of user interactions
- * @param {Object} interactiveChallenge - Interactive challenge data
- * @returns {number} Interaction quality score (0-1)
- */
-function calculateInteractionQuality(interactiveChallenge) {
-  let quality = 0.5; // Default score
-  
-  // Analyze mouse movements for natural patterns
-  if (interactiveChallenge.userInteractions) {
-    const movements = interactiveChallenge.userInteractions.filter(i => i.type === 'mousemove');
-    
-    if (movements.length > 10) {
-      quality += 0.2; // Many movements suggest human interaction
-      
-      // Analyze movement patterns
-      if (movements.length >= 3) {
-        // Check for natural acceleration/deceleration patterns
-        let naturalPatterns = 0;
-        let straightLinePatterns = 0;
-        
-        for (let i = 2; i < movements.length; i++) {
-          const p1 = movements[i-2].data;
-          const p2 = movements[i-1].data;
-          const p3 = movements[i].data;
-          
-          if (p1 && p2 && p3) {
-            // Calculate direction changes
-            const vector1 = { x: p2.x - p1.x, y: p2.y - p1.y };
-            const vector2 = { x: p3.x - p2.x, y: p3.y - p2.y };
-            
-            // Calculate angle between vectors
-            const dot = vector1.x * vector2.x + vector1.y * vector2.y;
-            const mag1 = Math.sqrt(vector1.x * vector1.x + vector1.y * vector1.y);
-            const mag2 = Math.sqrt(vector2.x * vector2.x + vector2.y * vector2.y);
-            
-            if (mag1 > 0 && mag2 > 0) {
-              const angle = Math.acos(dot / (mag1 * mag2));
-              
-              // Check for straight line movement (bot-like)
-              if (Math.abs(angle) < 0.1) {
-                straightLinePatterns++;
-              }
-              
-              // Check for natural curves
-              if (angle > 0.1 && angle < Math.PI / 4) {
-                naturalPatterns++;
-              }
-            }
-          }
-        }
-        
-        // Calculate ratios of patterns
-        const totalPatterns = movements.length - 2;
-        const straightLineRatio = straightLinePatterns / totalPatterns;
-        const naturalRatio = naturalPatterns / totalPatterns;
-        
-        if (straightLineRatio > 0.7) {
-          quality -= 0.3; // Too many straight lines
-        }
-        
-        if (naturalRatio > 0.3) {
-          quality += 0.2; // Good amount of natural curves
-        }
-      }
-    }
-  }
-  
-  // Cap between 0 and 1
-  return Math.min(Math.max(quality, 0), 1);
-}
 
 /**
  * Combines automatic and interactive test results to get final bot probability
@@ -551,16 +485,9 @@ function calculateFinalBotProbability(automaticProbability, interactiveResult) {
   return Math.min(Math.max(finalProbability, 0), 1);
 }
 
-// Custom error class for CAPTCHA validation
-class CaptchaError extends Error {
-  constructor(code, {message, details}) {
-    super(message);
-    this.code = code;
-    this.details = details;
-  }
-}
-
-module.exports = { 
-  createChallengeForRequest, 
+module.exports = {
+  assignTestSuite,
+  createChallengeForRequest,
+  getAndVerifyChallenge,
   verifySubmission
 };
