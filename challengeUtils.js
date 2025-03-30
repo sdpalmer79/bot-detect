@@ -2,9 +2,32 @@ const { v4: uuidv4 } = require('uuid');
 const captchaTests = require('./captcha-tests');
 
 const MAX_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_CHALLENGE_AGE, 5 * 60 * 1000);
+const MAX_INTERACTIVE_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_INTERACTIVE_CHALLENGE_AGE, 3 * 60 * 1000); // 3 minutes default
 const CHALLENGE_POW_DIFFICULTY = parseEnvNumber(process.env.CHALLENGE_POW_DIFFICULTY, 2);
 const INTERACTIVE_CHALLENGE_THRESHOLD = parseEnvNumber(process.env.INTERACTIVE_CHALLENGE_THRESHOLD, 0.6);
 const CHALLENGE_ID_HEADER = 'x-challenge-id';
+
+// Challenge Statuses
+const STATUS = {
+  CREATED: 'CREATED',                 // Initial state in memory
+  SERVED: 'SERVED',                   // Sent to client
+  AUTO_PENDING: 'AUTO_PENDING',       // Tests served, awaiting auto test results
+  INTERACTIVE_PENDING: 'INTERACTIVE_PENDING', // Auto tests submitted, interactive required
+  COMPLETED_SUCCESS: 'COMPLETED_SUCCESS', // Final success state
+  COMPLETED_FAILURE: 'COMPLETED_FAILURE'  // Final failure state
+};
+
+// Valid Status Transitions
+const VALID_TRANSITIONS = {
+  [STATUS.CREATED]: [STATUS.SERVED],
+  [STATUS.SERVED]: [STATUS.AUTO_PENDING, STATUS.COMPLETED_SUCCESS, STATUS.COMPLETED_FAILURE],
+  [STATUS.AUTO_PENDING]: [STATUS.INTERACTIVE_PENDING, STATUS.COMPLETED_SUCCESS, STATUS.COMPLETED_FAILURE],
+  [STATUS.INTERACTIVE_PENDING]: [STATUS.COMPLETED_SUCCESS, STATUS.COMPLETED_FAILURE],
+  
+  // Terminal states have no valid transitions out
+  [STATUS.COMPLETED_SUCCESS]: [],
+  [STATUS.COMPLETED_FAILURE]: []
+};
 
 function parseEnvNumber(value, defaultValue) {
     if (value === undefined || value === null || value === '') {
@@ -72,73 +95,185 @@ function assignTestSuite(suitesMap) {
   return selectedSuiteData;
 }
 
+/**
+ * Updates the status of a challenge, enforcing lifecycle rules and logging changes.
+ * @param {Object} challenge - The challenge object to update.
+ * @param {string} newStatus - The desired new status (must be one of STATUS values).
+ * @param {Map<string, Object>} challengeCache - The cache storing active challenges.
+ * @param {Object} [details={}] - Optional details related to the status change.
+ * @returns {Object} The updated challenge object.
+ * @throws {CaptchaError} If the status transition is invalid or the challenge is in a terminal state.
+ */
+function updateChallengeStatus(challenge, newStatus, challengeCache, details = {}) {
+  if (!challenge || !challenge.id) {
+    throw new CaptchaError('INVALID_CHALLENGE_OBJECT', {
+      message: 'Invalid challenge object provided for status update.',
+      details: { challengeId: challenge?.id }
+    });
+  }
+
+  const currentStatus = challenge.status;
+  const challengeId = challenge.id;
+
+  // 1. Check if the new status is valid
+  if (!Object.values(STATUS).includes(newStatus)) {
+    throw new CaptchaError('INVALID_STATUS_VALUE', {
+      message: `Invalid target status value: ${newStatus}`,
+      details: { challengeId, currentStatus, attemptedStatus: newStatus }
+    });
+  }
+
+  // 2. Check if the challenge is already in a terminal state
+  if (currentStatus === STATUS.COMPLETED_SUCCESS || currentStatus === STATUS.COMPLETED_FAILURE) {
+    throw new CaptchaError('CHALLENGE_ALREADY_COMPLETED', {
+      message: `Challenge ${challengeId} is already completed with status ${currentStatus}. Cannot change status.`,
+      details: { challengeId, currentStatus, attemptedStatus: newStatus }
+    });
+  }
+
+  // 3. Check if the transition is valid
+  const allowedTransitions = VALID_TRANSITIONS[currentStatus];
+  if (!allowedTransitions || !allowedTransitions.includes(newStatus)) {
+    throw new CaptchaError('INVALID_STATUS_TRANSITION', {
+      message: `Invalid status transition for challenge ${challengeId}: from ${currentStatus} to ${newStatus}.`,
+      details: {
+        challengeId,
+        currentStatus,
+        attemptedStatus: newStatus,
+        allowedNext: allowedTransitions || []
+      }
+    });
+  }
+
+  // 4. Log the status change
+  const timestamp = Date.now();
+  console.log(`[Challenge Status Update] ID: ${challengeId}, From: ${currentStatus}, To: ${newStatus}, Time: ${new Date(timestamp).toISOString()}`);
+
+  // 5. Add to history (initialize if needed)
+  if (!challenge.statusHistory) {
+    challenge.statusHistory = [];
+    // Add the implicit 'CREATED' state if it wasn't explicitly set
+    if (currentStatus !== STATUS.CREATED) {
+        challenge.statusHistory.push({ status: STATUS.CREATED, previousStatus: currentStatus, timestamp: challenge.timestamp, details: { message: "Initial creation" } });
+    }
+  }
+  challenge.statusHistory.push({ status: newStatus, timestamp, details });
+
+  // 6. Update the challenge status
+  challenge.status = newStatus;
+
+  // 7. Update the challenge in the cache
+  challengeCache.set(challengeId, challenge);
+
+  // 8. Return the updated challenge
+  return challenge;
+}
+
 function createChallengeForRequest(suiteData, request) {
-  // Use challengeId as the token
-  const challengeId = uuidv4(); 
+  const challengeId = uuidv4();
+  const now = Date.now();
   const challenge = {
-    id: challengeId, // This is the token
+    id: challengeId,
     suiteId: suiteData.suiteId,
     suiteUrl: `/suite/${suiteData.suiteId}`,
-    timestamp: Date.now(),
+    timestamp: now,
     powDifficulty: CHALLENGE_POW_DIFFICULTY,
-    // Ensure powPrefix uses the generated challengeId
-    powPrefix: `${challengeId.substring(0, 8)}-${suiteData.suiteId.substring(0, 8)}`, 
-    expiry: Date.now() + MAX_CHALLENGE_AGE // Explicit expiry time
+    powPrefix: `${challengeId.substring(0, 8)}-${suiteData.suiteId.substring(0, 8)}`,
+    expiry: now + MAX_CHALLENGE_AGE,
+    status: STATUS.CREATED, // Initialize status
+    statusHistory: [{ status: STATUS.CREATED, timestamp: now, details: { message: "Challenge object created" } }] // Initialize history
   };
   return challenge;
 }
 
 /**
- * Retrieves the challenge ID from request headers and validates the challenge.
+ * Retrieves the challenge ID from request headers and validates the challenge, including its status.
  * @param {Object} req - The Express request object.
  * @param {Map<string, Object>} challengeCache - The cache storing active challenges.
+ * @param {string|string[]} [expectedStatus] - Optional. The expected status or an array of expected statuses for the challenge.
  * @returns {Object} The validated challenge object.
- * @throws {CaptchaError} If token is missing, challenge not found, or challenge expired.
+ * @throws {CaptchaError} If token is missing, challenge not found, challenge expired, or challenge is in an unexpected state.
  */
-function getAndVerifyChallenge(req, challengeCache) {
+function getAndVerifyChallenge(req, challengeCache, expectedStatus = null) {
   // 1. Fetch the token (challenge ID) from the header
   const challengeId = req.headers[CHALLENGE_ID_HEADER];
-  
+
   if (!challengeId) {
     throw new CaptchaError('MISSING_CHALLENGE_ID', {
       message: `Missing challenge ID in header '${CHALLENGE_ID_HEADER}'.`,
       details: { headers: req.headers }
     });
   }
-  
+
   // 2. Fetch the challenge from the cache
   const challenge = challengeCache.get(challengeId);
-  
+
   if (!challenge) {
     throw new CaptchaError('CHALLENGE_NOT_FOUND', {
       message: `Challenge with ID '${challengeId}' not found in cache. It might have expired or never existed.`,
       details: { challengeId }
     });
   }
-  
+
   // 3. Verify that the challenge age has not expired
   const challengeAge = Date.now() - challenge.timestamp;
   const maxAge = challenge.expiry ? (challenge.expiry - challenge.timestamp) : MAX_CHALLENGE_AGE; // Use expiry if available, else default
-  
+
   if (challengeAge > maxAge) {
-    // Optionally remove expired challenge from cache
-    challengeCache.delete(challengeId);
-    
+    // Optionally remove expired challenge from cache (or mark as failed/expired)
+    // challengeCache.delete(challengeId);
+    try {
+        // Attempt to update status if not already completed
+        if (challenge.status !== STATUS.COMPLETED_SUCCESS && challenge.status !== STATUS.COMPLETED_FAILURE) {
+            updateChallengeStatus(challenge, STATUS.COMPLETED_FAILURE, challengeCache, { reason: 'Expired during retrieval' });
+        }
+    } catch (statusError) {
+        console.warn(`Could not update status for expired challenge ${challengeId}: ${statusError.message}`);
+        challengeCache.delete(challengeId); // Fallback to delete if status update fails
+    }
+
     throw new CaptchaError('CHALLENGE_EXPIRED', {
       message: `Challenge '${challengeId}' has expired.`,
-      details: { 
-        challengeId, 
-        timestamp: challenge.timestamp, 
-        expiry: challenge.expiry, 
-        now: Date.now(), 
-        age: challengeAge, 
-        maxAge 
+      details: {
+        challengeId,
+        timestamp: challenge.timestamp,
+        expiry: challenge.expiry,
+        now: Date.now(),
+        age: challengeAge,
+        maxAge
       }
     });
   }
-  
-  // 4. Return the challenge if successful
-  console.log(`Challenge ${challengeId} retrieved and validated successfully.`);
+
+  // --- Status Verification ---
+  const currentStatus = challenge.status;
+
+  // 4. Check if challenge is already completed
+  if (currentStatus === STATUS.COMPLETED_SUCCESS || currentStatus === STATUS.COMPLETED_FAILURE) {
+    throw new CaptchaError('CHALLENGE_ALREADY_COMPLETED', {
+      message: `Challenge ${challengeId} is already completed with status ${currentStatus}.`,
+      details: { challengeId, currentStatus }
+    });
+  }
+
+  // 5. Check if the current status matches the expected status(es)
+  if (expectedStatus) {
+    const expectedStatuses = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
+    if (!expectedStatuses.includes(currentStatus)) {
+      throw new CaptchaError('INVALID_CHALLENGE_STATE', {
+        message: `Challenge ${challengeId} is in an unexpected state. Expected: ${expectedStatuses.join(' or ')}, Actual: ${currentStatus}.`,
+        details: {
+          challengeId,
+          currentStatus,
+          expectedStatus: expectedStatuses
+        }
+      });
+    }
+  }
+  // --- End Status Verification ---
+
+  // 6. Return the challenge if successful
+  console.log(`Challenge ${challengeId} retrieved and validated successfully (Status: ${currentStatus}).`);
   return challenge;
 }
 
@@ -162,6 +297,7 @@ function createInteractiveChallenge(challenge, suiteData, botProbability) {
     id: interactiveChallengeId,
     parentChallengeId: challenge.id,
     timestamp: Date.now(),
+    expiry: Date.now() + MAX_INTERACTIVE_CHALLENGE_AGE,
     ...selectedTestConfig
   };
   
@@ -454,5 +590,8 @@ module.exports = {
   assignTestSuite,
   createChallengeForRequest,
   getAndVerifyChallenge,
-  verifyAutoTests
+  verifyAutoTests,
+  updateChallengeStatus,
+  STATUS,
+  CaptchaError
 };

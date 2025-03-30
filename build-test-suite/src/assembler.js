@@ -589,14 +589,48 @@ window.CaptchaSystem = {
   
   // Method to activate interactive challenge when needed
   startInteractiveVerify: async function(interactiveChallenge) {
-    console.log("Starting interactive challenge");
-    
+    console.log("Starting interactive challenge:", interactiveChallenge);
+
     try {
-      const result = await runInteractiveTest(challenge);
+      // 1. Get the test ID from the interactive challenge object
+      const testId = interactiveChallenge.testId;
+      if (!testId) {
+        throw new Error("Interactive challenge object is missing testId.");
+      }
+
+      // 2. Find the corresponding test implementation function
+      const testFunction = testImplementations[testId];
+      if (typeof testFunction !== 'function') {
+        throw new Error(\`Interactive test implementation not found for ID: \${testId}\`);
+      }
+
+      // 3. Prepare parameters for the test function
+      // The test function expects the clientParams directly
+      const clientParams = interactiveChallenge.clientParams || {};
+
+      // Add the interactive challenge ID itself to the params for potential use by the test
+      clientParams.interactiveChallengeId = interactiveChallenge.id;
+
+      // Ensure the container ID is available (defaulting if necessary)
+      clientParams.containerId = clientParams.containerId || 'captcha-graphic';
+
+      // 4. Execute the interactive test function
+      console.log(\`Executing interactive test function for test ID: \${testId}\`);
+      const result = await testFunction(clientParams); // Pass clientParams
+
+      // 5. Add the interactive challenge ID to the result for submission
+      const finalResult = {
+        id: interactiveChallenge.id, // Include the interactive challenge ID
+        ...result // Spread the result from the test function
+      };
+
+      console.log("Interactive challenge result:", finalResult);
+      return finalResult;
 
     } catch (error) {
       console.error("Interactive test failed:", error);
       return {
+        id: interactiveChallenge?.id, // Include ID if available
         success: false,
         error: error.message || "Unknown interactive test error"
       };

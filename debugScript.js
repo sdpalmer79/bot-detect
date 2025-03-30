@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { buildSuites } = require('./build-test-suite/src/build');
-const { assignTestSuite, createChallengeForRequest, getAndVerifyChallenge, verifyAutoTests } = require('./challengeUtils');
+const { assignTestSuite, createChallengeForRequest, getAndVerifyChallenge, verifyAutoTests, updateChallengeStatus, STATUS, CaptchaError } = require('./challengeUtils');
 
 const suiteCache = new Map();
 const challengeCache = new Map();
@@ -70,7 +70,8 @@ async function startDebugServer(port = 3000) {
       console.log('Selected suite data for challenge:', selectedSuiteData.suiteId);
 
       const challenge = createChallengeForRequest(selectedSuiteData, req);
-      challengeCache.set(challenge.id, challenge); // Use challenge.id as key
+      updateChallengeStatus(challenge, STATUS.SERVED);
+      challengeCache.set(challenge.id, challenge);
       console.log('Sending challenge:', challenge);
       res.json(challenge);
     } catch (error) {
@@ -79,11 +80,11 @@ async function startDebugServer(port = 3000) {
     }
   });
 
-  
+  // API endpoint to serve the test suite file
   app.get('/suite/:suiteId', (req, res) => {
     try {
       // 1. Verify the challenge token from the header
-      const challenge = getAndVerifyChallenge(req, challengeCache);
+      const challenge = getAndVerifyChallenge(req, challengeCache, STATUS.SERVED);
       
       // 2. Check if the requested suiteId matches the one in the challenge
       if (req.params.suiteId === challenge.suiteId) {
@@ -93,6 +94,7 @@ async function startDebugServer(port = 3000) {
         if (fs.existsSync(requestedSuiteJsPath)) {
           console.log(`Serving suite file for valid challenge ${challenge.id}: ${requestedSuiteJsPath}`);
           res.sendFile(requestedSuiteJsPath);
+          updateChallengeStatus(challenge, STATUS.AUTO_PENDING);
         } else {
           console.error(`Suite file not found for suiteId ${req.params.suiteId} at ${requestedSuiteJsPath}`);
           res.status(404).send('Suite file not found.');
@@ -124,13 +126,13 @@ async function startDebugServer(port = 3000) {
 
     let challenge; // Define challenge in the outer scope
     try {
-      // 1. Get and validate the challenge using the token from the header
-      challenge = getAndVerifyChallenge(req, challengeCache);
+      // 1. Get and validate the challenge (ensure it's in SERVED state)
+      challenge = getAndVerifyChallenge(req, challengeCache, STATUS.AUTO_PENDING);
 
-      // 2. Retrieve the corresponding suite data (assuming suiteId is in challenge)
+      // 2. Retrieve the corresponding suite data
       const suiteData = suiteCache.get(challenge.suiteId);
       if (!suiteData) {
-        throw new CaptchaError('SUITE_DATA_MISSING', { // Use CaptchaError
+        throw new CaptchaError('SUITE_DATA_MISSING', {
           message: `Suite data not found for suite ID: ${challenge.suiteId}`,
           details: { suiteId: challenge.suiteId }
         });
@@ -141,68 +143,72 @@ async function startDebugServer(port = 3000) {
 
       console.log('Automatic verification result:', result);
 
-      // Save the auto test result without the interactive challenge ---
-      const autoResultToSave = { ...result }; // Create a shallow copy
+      // Save the auto test result without the interactive challenge
+      const autoResultToSave = { ...result };
       if (autoResultToSave.interactiveChallenge) {
-        delete autoResultToSave.interactiveChallenge; // Remove interactive part before saving
+        delete autoResultToSave.interactiveChallenge;
       }
       challenge.autoVerificationResult = autoResultToSave;
 
-      // 4. Handle result: either success, failure, or requires interactive
+      // 4. Determine next status and prepare response payload
       let responsePayload;
+      let nextStatus;
 
       if (result.interactiveChallenge) {
         // Interactive challenge required
+        nextStatus = STATUS.INTERACTIVE_PENDING;
         const interactiveChallenge = result.interactiveChallenge;
-
-        // --- Modification: Save only the ID reference to the original challenge ---
         challenge.interactiveChallengeId = interactiveChallenge.id; // Save reference ID
+        interactiveChallengeCache.set(interactiveChallenge.id, interactiveChallenge); // Store full details
 
-        // Store the full interactive challenge details (including verificationParams)
-        // in the separate interactive cache
-        interactiveChallengeCache.set(interactiveChallenge.id, interactiveChallenge);
-        console.log(`Stored interactive challenge ${interactiveChallenge.id} with verification params.`);
-
-        // Prepare the response for the client (WITHOUT verificationParams)
         responsePayload = {
-          valid: false, // Auto tests did not pass outright
+          valid: false,
           requiresInteractiveChallenge: true,
           interactiveChallenge: {
             id: interactiveChallenge.id,
             testId: interactiveChallenge.testId,
-            clientParams: interactiveChallenge.clientParams // Only send client params
+            clientParams: interactiveChallenge.clientParams
           }
         };
 
       } else if (result.valid) {
         // Auto tests passed, verification successful
+        nextStatus = STATUS.COMPLETED_SUCCESS;
         responsePayload = {
           valid: true,
           requiresInteractiveChallenge: false,
           message: "Verification successful."
         };
-        console.log(`Challenge ${challenge.id} completed successfully (kept in cache).`);
 
       } else {
         // Auto tests failed, verification failed
+        nextStatus = STATUS.COMPLETED_FAILURE;
         responsePayload = {
           valid: false,
           requiresInteractiveChallenge: false,
-          message: result.message || "Verification failed based on automatic tests.",
-          errorCode: result.errorCode || 'AUTO_TESTS_FAILED'
+          message: 'Automatic tests failed.',
+          errorCode: 'AUTO_TESTS_FAILED'
         };
-        console.log(`Challenge ${challenge.id} failed verification (kept in cache).`);
       }
 
-      // Always update the challenge in the cache with the latest state
-      challengeCache.set(challenge.id, challenge);
-
+      // 5. Update challenge status
+      updateChallengeStatus(challenge, nextStatus, challengeCache, statusDetails);
       res.json(responsePayload);
-
     } catch (error) {
       console.error("Verification endpoint error:", error);
+      // If challenge exists, attempt to mark it as failed due to error
+      if (challenge && challenge.id && challengeCache.has(challenge.id)) {
+         try {
+             // Only update if not already completed
+             if (challenge.status !== STATUS.COMPLETED_SUCCESS && challenge.status !== STATUS.COMPLETED_FAILURE) {
+                 updateChallengeStatus(challenge, STATUS.COMPLETED_FAILURE, challengeCache, { error: `Auto verification endpoint error: ${error.message}` });
+             }
+         } catch (statusError) {
+             console.error("Failed to update challenge status on error:", statusError);
+         }
+      }
       // Send appropriate error response based on CaptchaError or generic error
-      if (error.code) { // Check if it's a CaptchaError
+      if (error.code) {
           res.status(400).json({
               valid: false,
               errorCode: error.code,
@@ -224,47 +230,137 @@ app.post('/api/verify-interactive-captcha', async (req, res) => {
   console.log('Interactive verification received:');
   console.log(JSON.stringify(req.body, null, 2));
 
+  let originalChallenge; // Define in outer scope for cleanup
+  let interactiveChallengeId; // Define in outer scope for cleanup
   try {
-    // 1. Get and validate the challenge using the token from the header
-    // Note: This assumes the interactive submission also includes the original challenge ID header
-    const challenge = getAndVerifyChallenge(req, challengeCache); 
+    // 1. Get and validate the *original* challenge (must be INTERACTIVE_PENDING)
+    // Assumes the client sends the original challenge ID in the header
+    originalChallenge = getAndVerifyChallenge(req, challengeCache, STATUS.INTERACTIVE_PENDING);
 
-    // 2. Retrieve the corresponding suite data
-    const suiteData = suiteCache.get(challenge.suiteId);
-     if (!suiteData) {
-      throw new Error(`Suite data not found for suite ID: ${challenge.suiteId}`); // Or use CaptchaError
+    // 2. Get the interactive challenge submission from the request body
+    const interactiveSubmission = req.body.interactiveChallenge;
+    if (!interactiveSubmission || !interactiveSubmission.id) {
+        throw new CaptchaError('MISSING_INTERACTIVE_ID', {
+            message: 'Interactive challenge ID missing in submission.',
+            details: {}
+        });
+    }
+    interactiveChallengeId = interactiveSubmission.id;
+
+    // 3. Retrieve the stored interactive challenge data (including verificationParams)
+    const storedInteractiveData = interactiveChallengeCache.get(interactiveChallengeId);
+    if (!storedInteractiveData || !storedInteractiveData.verificationParams) {
+        throw new CaptchaError('INTERACTIVE_CHALLENGE_NOT_FOUND', {
+            message: `Interactive challenge data not found or expired for ID: ${interactiveChallengeId}`,
+            details: { interactiveChallengeId }
+        });
     }
 
-    // 3. TODO: Implement specific interactive verification logic
-    // This will likely involve:
-    //    a. Retrieving the stored verificationParams for the interactive challenge ID (from req.body.interactiveChallenge.id)
-    //    b. Finding the correct interactive test module using suiteData
-    //    c. Calling the test module's verifyResult with the submitted interactive solution and the stored verificationParams.
-    //    d. Combining the automatic and interactive results (similar to how it's done in challengeUtils.determineVerificationResult)
+    // 4. Verify interactive challenge expiry (using its own expiry time)
+    if (Date.now() > storedInteractiveData.expiry) {
+        interactiveChallengeCache.delete(interactiveChallengeId); // Clean up expired interactive challenge
+        throw new CaptchaError('INTERACTIVE_CHALLENGE_EXPIRED', {
+            message: `Interactive challenge ${interactiveChallengeId} has expired.`,
+            details: { interactiveChallengeId, expiry: storedInteractiveData.expiry, now: Date.now() }
+        });
+    }
 
-    // Placeholder for interactive verification result
-    const verification = { 
-        valid: true, // Replace with actual interactive verification logic
-        message: "Interactive verification placeholder - needs implementation" 
-    }; 
+    // 5. Retrieve the corresponding suite data using the original challenge's suiteId
+    const suiteData = suiteCache.get(originalChallenge.suiteId);
+    if (!suiteData) {
+      throw new CaptchaError('SUITE_DATA_MISSING', {
+        message: `Suite data not found for suite ID: ${originalChallenge.suiteId}`,
+        details: { suiteId: originalChallenge.suiteId }
+      });
+    }
 
-    console.log('Interactive verification result:', verification);
-    res.json(verification);
+    // 6. Find the interactive test module implementation
+    // Use originalTestId stored in interactive data to find the module
+    const testModule = captchaTests.getTestById(storedInteractiveData.originalTestId);
+     if (!testModule || typeof testModule.verifyResult !== 'function') {
+        throw new CaptchaError('INTERACTIVE_TEST_MODULE_INVALID', {
+            message: `Interactive test module invalid or missing verifyResult for ID: ${storedInteractiveData.originalTestId}`,
+            details: { originalId: storedInteractiveData.originalTestId }
+        });
+    }
+
+    // 7. Call the test module's verifyResult for the interactive test
+    // Pass the client's submission, the stored data (for context), and the verification params
+    const interactiveVerification = await testModule.verifyResult(
+        interactiveSubmission, // Client's answer and behavioral data
+        storedInteractiveData.verificationParams // Server-side verification data
+        // Note: The 'challenge' parameter in verifyResult might not be needed for interactive,
+        // or it could refer to the storedInteractiveData if the test needs context like timestamp/expiry.
+        // Adjust the call based on the specific test module's interface.
+    );
+
+    // 8. Determine final status and response based on interactive result
+    let nextStatus;
+    let statusDetails = { interactiveResult: interactiveVerification };
+    let responsePayload;
+
+    if (interactiveVerification.valid) {
+        nextStatus = STATUS.COMPLETED_SUCCESS;
+        statusDetails.message = "Interactive verification successful.";
+        responsePayload = {
+            valid: true,
+            message: "Verification successful."
+            // Optionally include final bot probability if calculated
+            // botProbability: calculateFinalBotProbability(...)
+        };
+    } else {
+        nextStatus = STATUS.COMPLETED_FAILURE;
+        statusDetails.message = "Interactive verification failed.";
+        statusDetails.errorCode = interactiveVerification.details?.errorCode || 'INTERACTIVE_FAILED';
+        responsePayload = {
+            valid: false,
+            errorCode: statusDetails.errorCode,
+            message: statusDetails.message,
+            details: interactiveVerification.details
+        };
+    }
+
+    // 9. Update the original challenge status
+    originalChallenge.interactiveVerificationResult = interactiveVerification; // Store result
+    originalChallenge = updateChallengeStatus(originalChallenge, nextStatus, challengeCache, statusDetails);
+
+    // 10. Clean up interactive cache entry
+    interactiveChallengeCache.delete(interactiveChallengeId);
+    console.log(`Cleaned up interactive challenge ${interactiveChallengeId}`);
+
+    console.log('Final verification result:', responsePayload);
+    res.json(responsePayload);
 
   } catch (error) {
      console.error("Interactive verification endpoint error:", error);
+     // If original challenge exists, attempt to mark it as failed due to error
+     if (originalChallenge && originalChallenge.id && challengeCache.has(originalChallenge.id)) {
+         try {
+             // Only update if not already completed
+             if (originalChallenge.status !== STATUS.COMPLETED_SUCCESS && originalChallenge.status !== STATUS.COMPLETED_FAILURE) {
+                 updateChallengeStatus(originalChallenge, STATUS.COMPLETED_FAILURE, challengeCache, { error: `Interactive verification endpoint error: ${error.message}` });
+             }
+         } catch (statusError) {
+             console.error("Failed to update challenge status on error:", statusError);
+         }
+     }
+     // Clean up interactive cache if ID is known, even on error
+     if (interactiveChallengeId) {
+         interactiveChallengeCache.delete(interactiveChallengeId);
+     }
+
      if (error.code) { // Check if it's a CaptchaError
-        res.status(400).json({ 
-            valid: false, 
-            errorCode: error.code, 
+        res.status(400).json({
+            valid: false,
+            errorCode: error.code,
             message: error.message,
-            details: error.details 
+            details: error.details
         });
     } else {
-        res.status(500).json({ 
-            valid: false, 
-            errorCode: 'SERVER_ERROR', 
-            message: 'Internal server error during interactive verification.' 
+        res.status(500).json({
+            valid: false,
+            errorCode: 'SERVER_ERROR',
+            message: 'Internal server error during interactive verification.'
         });
     }
   }
