@@ -430,7 +430,7 @@
             timestamp: Date.now(),   
             
             // Results from interactive challenge
-            interactiveChallenge: interactiveResult,
+            interactiveResult,
             
             // Environment data
             environment: {
