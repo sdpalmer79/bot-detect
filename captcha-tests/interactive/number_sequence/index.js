@@ -8,7 +8,7 @@
 
 const crypto = require('crypto');
 const path = require('path');
-const fs = require('.fs');
+const fs = require('fs');
 const { createCanvas, registerFont } = require('canvas');
 const os = require('os');
 
@@ -519,6 +519,7 @@ module.exports = {
 
   /**
    * Declares the parameters this test accepts
+   */
   getParameterDefinitions() {
     return {
       // Parameter for image URL prefix

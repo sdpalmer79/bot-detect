@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { buildSuites } = require('./build-test-suite/src/build');
-const { assignTestSuite, createChallengeForRequest, getAndVerifyChallenge, verifyAutoTests, updateChallengeStatus, STATUS, CaptchaError } = require('./challengeUtils');
+const { createChallenge, getAndVerifyChallenge, verifyAutoTests, updateChallengeStatus, STATUS, CaptchaError } = require('./challengeUtils');
 
 const suiteCache = new Map();
 const challengeCache = new Map();
@@ -40,6 +40,9 @@ async function startDebugServer(port = 3000) {
     fs.mkdirSync(debugDir, { recursive: true });
   }
   
+  // Create a challenge for the test suite
+  const challenge = createChallenge(suiteCache, challengeCache);
+
   // Create Express app
   const app = express();
   
@@ -66,12 +69,8 @@ async function startDebugServer(port = 3000) {
     console.log('Request body:', JSON.stringify(req.body, null, 2));
     
     try {
-      const selectedSuiteData = assignTestSuite(suiteCache);
-      console.log('Selected suite data for challenge:', selectedSuiteData.suiteId);
-
-      const challenge = createChallengeForRequest(selectedSuiteData, req);
-      updateChallengeStatus(challenge, STATUS.SERVED);
-      challengeCache.set(challenge.id, challenge);
+      const challenge = getAndVerifyChallenge(req, challengeCache, STATUS.CREATED);
+      updateChallengeStatus(challenge, STATUS.SERVED, challengeCache);
       console.log('Sending challenge:', challenge);
       res.json(challenge);
     } catch (error) {
@@ -94,7 +93,7 @@ async function startDebugServer(port = 3000) {
         if (fs.existsSync(requestedSuiteJsPath)) {
           console.log(`Serving suite file for valid challenge ${challenge.id}: ${requestedSuiteJsPath}`);
           res.sendFile(requestedSuiteJsPath);
-          updateChallengeStatus(challenge, STATUS.AUTO_PENDING);
+          updateChallengeStatus(challenge, STATUS.AUTO_PENDING, challengeCache);
         } else {
           console.error(`Suite file not found for suiteId ${req.params.suiteId} at ${requestedSuiteJsPath}`);
           res.status(404).send('Suite file not found.');
@@ -192,7 +191,7 @@ async function startDebugServer(port = 3000) {
       }
 
       // 5. Update challenge status
-      updateChallengeStatus(challenge, nextStatus, challengeCache, statusDetails);
+      updateChallengeStatus(challenge, nextStatus, challengeCache);
       res.json(responsePayload);
     } catch (error) {
       console.error("Verification endpoint error:", error);
@@ -320,7 +319,7 @@ async function startDebugServer(port = 3000) {
 
       // 9. Update the original challenge status
       originalChallenge.interactiveVerificationResult = interactiveVerification; // Store result
-      originalChallenge = updateChallengeStatus(originalChallenge, nextStatus, challengeCache, statusDetails);
+      originalChallenge = updateChallengeStatus(originalChallenge, nextStatus, challengeCache);
 
       console.log('Final verification result:', responsePayload);
       res.json(responsePayload);

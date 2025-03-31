@@ -2,15 +2,7 @@
 (function() {
     // Extract token from query string
     const urlParams = new URLSearchParams(window.location.search);
-    const securityToken = urlParams.get('token') || '';
-    
-    // Generate a UUID for request correlation
-    function generateUUID() {
-      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-      });
-    }
+    const securityToken = urlParams.get('X-Challenge-ID') || '';
 
     // Collect environment data
     function collectEnvironmentData() {
@@ -208,14 +200,12 @@
     }
     
     async function requestChallenge() {
-      // Generate request ID to correlate this request with later submissions
-      const requestId = generateUUID();
       
       // Collect essential data for initial fingerprinting
       const envData = collectEnvironmentData();
       const connectionData = getConnectionInfo();
       const featuresData = detectFeatures();
-      const behaviorData = collectBehavioralData(false); // Basic behavioral data only
+      const behaviorData = collectBehavioralData(false);
       
       try {
         console.log("Requesting challenge from server...");
@@ -223,14 +213,10 @@
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'X-Security-Token': securityToken,
-            'X-Request-ID': requestId
+            'X-Challenge-ID': securityToken
           },
           body: JSON.stringify({
-            // Request metadata
-            requestId: requestId,
             timestamp: Date.now(),
-            token: securityToken,
             pageUrl: window.location.href,
             referrer: document.referrer,
             
@@ -252,10 +238,6 @@
           })
         });
         
-        // Store the request ID and initial environment for later comparison
-        localStorage.setItem('captchaRequestId', requestId);
-        localStorage.setItem('initialEnvironment', JSON.stringify(envData));
-        
         if (!response.ok) {
           throw new Error("Failed to get CAPTCHA challenge");
         }
@@ -273,9 +255,6 @@
     async function submitAutoResults(autoResults) {
       updateStatus("Completing verification...");
       
-      // Get the stored request ID 
-      const requestId = localStorage.getItem('captchaRequestId');
-      
       // Collect current environment data
       const currentEnvData = collectEnvironmentData();
       
@@ -288,8 +267,7 @@
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'X-Security-Token': securityToken,
-            'X-Request-ID': requestId
+            'X-Challenge-ID': securityToken
           },
           body: JSON.stringify({
             timestamp: Date.now(),
@@ -340,74 +318,10 @@
         return { valid: false, error: error.message };
       }
     }
-
-    // Handle interactive challenge display and interaction
-    async function handleInteractiveChallenge(interactiveChallenge) {
-      return new Promise(async (resolve, reject) => {
-        try {
-          updateStatus("Loading visual challenge...");
-          
-          // Make the challenge container visible
-          const container = document.getElementById('captcha-graphic');
-          if (!container) {
-            throw new Error("Challenge container not found");
-          }
-          
-          container.style.display = 'block';
-          
-          // Clear any previous content
-          container.innerHTML = '';
-          
-          updateStatus("Please complete the visual challenge");
-          
-          // Check if CaptchaSystem is available
-          if (!window.CaptchaSystem) {
-            throw new Error("CaptchaSystem not available");
-          }
-          
-          // Check if interactiveTestImplementations exists
-          if (!window.CaptchaSystem.runInteractiveChallenge) {
-            throw new Error("Interactive test implementations not available");
-          }
-          
-          // Get the function name from the challenge
-          const testFunctionName = interactiveChallenge.parameters.test;
-          if (!testFunctionName) {
-            throw new Error("No test function specified in challenge parameters");
-          }
-          
-          // Get the actual function from interactiveTestImplementations
-          const testFunction = window.CaptchaSystem.interactiveTestImplementations[testFunctionName];
-          if (!testFunction) {
-            throw new Error(`Test function '${testFunctionName}' not found in interactiveTestImplementations`);
-          }
-          
-          // Create the context object for the test function
-          const context = {
-            challenge: interactiveChallenge.parameters,
-            container: container,
-            startTime: performance.now()
-          };
-          
-          // Execute the test function directly
-          const result = await testFunction(context);
-          
-          // Return the result
-          resolve(result);
-        } catch (error) {
-          console.error("Interactive challenge error:", error);
-          updateStatus("Error with interactive challenge");
-          reject(error);
-        }
-      });
-    }
     
     // Submit interactive challenge results
     async function submitInteractiveResults(interactiveResult) {
-      updateStatus("Submitting interactive verification...");
-      
-      // Get the stored request ID 
-      const requestId = localStorage.getItem('captchaRequestId');
+      updateStatus("Submitting interactive verification..."); 
       
       // Collect current environment data
       const currentEnvData = collectEnvironmentData();
@@ -421,8 +335,7 @@
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'X-Security-Token': securityToken,
-            'X-Request-ID': requestId
+            'X-Challenge-ID': securityToken
           },
           body: JSON.stringify({
             // Challenge identification
@@ -478,26 +391,41 @@
     // Load the CAPTCHA suite script
     function loadCaptchaSuite(suiteUrl) {
       updateStatus("Loading verification...");
-      
-      return new Promise((resolve, reject) => {
-        console.log(`Loading CAPTCHA suite from ${suiteUrl}...`);
-        const script = document.createElement('script');
-        script.src = suiteUrl + '?t=' + Date.now() + '&token=' + encodeURIComponent(securityToken);
-        script.onload = () => {
-          console.log('CAPTCHA suite loaded successfully.');
-          // Check if CaptchaSystem was properly defined
+      return new Promise(async (resolve, reject) => {
+        console.log(`Loading CAPTCHA suite from ${suiteUrl} using fetch with custom headers...`);
+        try {
+          const response = await fetch(suiteUrl, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/javascript',
+              'X-Challenge-ID': securityToken
+            }
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Failed to load suite: ${response.status} ${response.statusText}`);
+          }
+          
+          const scriptText = await response.text();
+          
+          // Inject the downloaded script into the document
+          const script = document.createElement('script');
+          script.type = 'text/javascript';
+          script.textContent = scriptText;
+          document.head.appendChild(script);
+          
+          // Verify if the script executed properly by checking for CaptchaSystem
           if (!window.CaptchaSystem) {
-            console.error('CaptchaSystem not defined after loading suite');
+            console.error('CaptchaSystem not defined after executing suite script');
             reject(new Error('Failed to initialize verification system'));
           } else {
+            console.log('CAPTCHA suite loaded and executed successfully.');
             resolve();
           }
-        };
-        script.onerror = (err) => {
-          console.error('Error loading CAPTCHA suite:', err);
-          reject(new Error("Failed to load verification suite"));
-        };
-        document.head.appendChild(script);
+        } catch (error) {
+          console.error('Error loading or executing CAPTCHA suite:', error);
+          reject(new Error("Failed to load or execute verification suite"));
+        }
       });
     }
     

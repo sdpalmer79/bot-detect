@@ -5,7 +5,7 @@ const MAX_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_CHALLENGE_AGE, 5 * 60 *
 const MAX_INTERACTIVE_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_INTERACTIVE_CHALLENGE_AGE, 3 * 60 * 1000); // 3 minutes default
 const CHALLENGE_POW_DIFFICULTY = parseEnvNumber(process.env.CHALLENGE_POW_DIFFICULTY, 2);
 const INTERACTIVE_CHALLENGE_THRESHOLD = parseEnvNumber(process.env.INTERACTIVE_CHALLENGE_THRESHOLD, 0.6);
-const CHALLENGE_ID_HEADER = 'x-challenge-id';
+const CHALLENGE_ID_HEADER = 'X-Challenge-ID';
 
 // Challenge Statuses
 const STATUS = {
@@ -169,7 +169,8 @@ function updateChallengeStatus(challenge, newStatus, challengeCache, details = {
   return challenge;
 }
 
-function createChallengeForRequest(suiteData, request) {
+function createChallenge(suiteCache, challengeCache) {
+  const suiteData = assignTestSuite(suiteCache);
   const challengeId = uuidv4();
   const now = Date.now();
   const challenge = {
@@ -181,8 +182,10 @@ function createChallengeForRequest(suiteData, request) {
     powPrefix: `${challengeId.substring(0, 8)}-${suiteData.suiteId.substring(0, 8)}`,
     expiry: now + MAX_CHALLENGE_AGE,
     status: STATUS.CREATED, // Initialize status
-    statusHistory: [{ status: STATUS.CREATED, timestamp: now, details: { message: "Challenge object created" } }] // Initialize history
+    statusHistory: [{ status: STATUS.CREATED, timestamp: now }] // Initialize history
   };
+  challengeCache.set(challengeId, challenge);
+  console.log(`Created challenge ${challengeId} for suite ${suiteData.suiteId}`);
   return challenge;
 }
 
@@ -588,7 +591,7 @@ function calculateFinalBotProbability(automaticProbability, interactiveResult) {
 
 module.exports = {
   assignTestSuite,
-  createChallengeForRequest,
+  createChallenge,
   getAndVerifyChallenge,
   verifyAutoTests,
   updateChallengeStatus,
