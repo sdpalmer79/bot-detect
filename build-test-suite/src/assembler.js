@@ -243,7 +243,7 @@ function selectInteractiveTests(seed) {
  * @param {Object} suiteParams - Suite-wide parameters
  * @return {Object} - Object mapping parameter names to values
  */
-function generateTestParams(test, seed, suiteParams = {}) {
+function generateTestParams(test, suiteSeed) {
   // Get parameter definitions from the test
   const parameterDefinitions = test.getParameterDefinitions ? 
     test.getParameterDefinitions() : {};
@@ -253,7 +253,7 @@ function generateTestParams(test, seed, suiteParams = {}) {
   }
   
   // Create a deterministic random number generator
-  const seedInt = parseInt(seed.substring(0, 8), 16);
+  const seedInt = parseInt(suiteSeed.substring(0, 8), 16);
   const rng = new PseudoRandom(seedInt);
   
   const paramValues = {};
@@ -264,7 +264,7 @@ function generateTestParams(test, seed, suiteParams = {}) {
       // Simple string parameter - direct value or special case
       if (paramDef === "SUITE_TRANSFORM_SEED") {
         // Use the provided suite-specific transform seed
-        paramValues[paramName] = suiteParams.transformSeed || 
+        paramValues[paramName] = suiteSeed || 
           crypto.randomBytes(16).toString('hex');
       } else {
         // Just use the string value directly
@@ -320,7 +320,7 @@ function createTestChain(testOrder, seed) {
       code,
       isRealTest: testInfo.isRealTest,
       dependsOn: previousTestId,
-      paramValues: generateTestParams(testInfo.test, seed + i, { transformSeed: seed })
+      paramValues: generateTestParams(testInfo.test, seed)
     });
     
     previousTestId = uniqueId;
@@ -361,14 +361,15 @@ function generateTestFunctions(chainedTests) {
     // Replace parameter placeholders with actual values
     let code = test.code;
     Object.entries(test.paramValues).forEach(([key, value]) => {
-      const placeholder = new RegExp(`{{${key}}}`, 'g');
+      const placeholder = new RegExp(`\\b${key}\\b`, 'g');
       const valueStr = JSON.stringify(value);
       code = code.replace(placeholder, valueStr);
     });
     
     // Replace function name placeholder
-    code = code.replace('TEST_FUNCTION_NAME', test.functionName);
-    
+    const funcPlaceholder = new RegExp(`\\bTEST_FUNCTION_NAME\\b`, 'g');
+    code = code.replace(funcPlaceholder, test.functionName);
+
     // Add function to the test implementations object
     return `  "${test.id}": ${code}`;
   }).join(',\n\n');

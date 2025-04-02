@@ -61,7 +61,7 @@ module.exports = {
             ${sharedCode.token_verification.calculateTokenHash.toString()}
 
             // Extract required data from challenge
-            const token = ctx.challenge.token || "";
+            const suiteId = ctx.challenge.suiteId || "";
             const timestamp = ctx.challenge.timestamp || 0;
             const challengeId = ctx.challenge.id || "";
             
@@ -72,7 +72,7 @@ module.exports = {
             const startTime = performance.now();
             
             // Calculate hash
-            const result = await calculateTokenHash(token, challengeId, timestamp, transformSeed);
+            const result = await calculateTokenHash(suiteId, challengeId, timestamp, transformSeed);
             
             // Calculate completion time
             const duration = performance.now() - startTime;
@@ -99,7 +99,7 @@ module.exports = {
             ${sharedCode.token_verification.calculateTokenHash.toString()}
 
             // Extract required data from challenge
-            const token = ctx.challenge.token || "";
+            const suiteId = ctx.challenge.suiteId || "";
             const timestamp = ctx.challenge.timestamp || 0;
             const challengeId = ctx.challenge.id || "";
             
@@ -118,7 +118,7 @@ module.exports = {
             // Preprocessing
             const preStart = performance.now();
             const inputs = {
-              token: String(token),
+              suiteId: String(suiteId),
               challengeId: String(challengeId),
               timestamp: Number(timestamp),
               transformSeed: String(transformSeed)
@@ -128,7 +128,7 @@ module.exports = {
             // Hash calculation
             const hashStart = performance.now();
             const result = await calculateTokenHash(
-              inputs.token, 
+              inputs.suiteId, 
               inputs.challengeId, 
               inputs.timestamp, 
               inputs.transformSeed
@@ -148,81 +148,6 @@ module.exports = {
               ...output,
               duration: timings.total,
               timingDetails: timings,
-              processedAt: Date.now()
-            };
-          } catch (error) {
-            return {
-              error: "Token verification failed",
-              errorMessage: error.message
-            };
-          }
-        }`
-      },
-      {
-        id: "token_verification_chunked",
-        description: "Token verification with chunked processing",
-        code: `async function TEST_FUNCTION_NAME(ctx) {
-          try {
-            // Intentionally not using the shared code directly
-            // Instead implementing the algorithm with chunking for verification
-            
-            // Extract required data from challenge
-            const token = ctx.challenge.token || "";
-            const timestamp = ctx.challenge.timestamp || 0;
-            const challengeId = ctx.challenge.id || "";
-            const transformSeed = PARAM_TRANSFORM_SEED;
-            
-            // Start time measurement
-            const startTime = performance.now();
-            
-            // Create combined input in chunks to simulate more intensive processing
-            let combinedInput = '';
-            
-            // Chunk 1: Add token
-            combinedInput += token;
-            await new Promise(r => setTimeout(r, 1)); // Tiny delay
-            
-            // Chunk 2: Add challenge ID
-            combinedInput += ':' + challengeId;
-            await new Promise(r => setTimeout(r, 1)); // Tiny delay
-            
-            // Chunk 3: Add timestamp
-            combinedInput += ':' + timestamp;
-            await new Promise(r => setTimeout(r, 1)); // Tiny delay
-            
-            // Chunk 4: Add transform seed
-            combinedInput += ':' + transformSeed;
-            
-            // Calculate hash
-            let tokenHash;
-            try {
-              const encoder = new TextEncoder();
-              const data = encoder.encode(combinedInput);
-              const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-              
-              // Convert hash to hex string
-              tokenHash = Array.from(new Uint8Array(hashBuffer))
-                .map(b => b.toString(16).padStart(2, '0'))
-                .join('');
-            } catch (e) {
-              // Fallback for environments without crypto.subtle
-              // Note: This creates deliberate variation in computation time
-              let hash = 0;
-              for (let i = 0; i < combinedInput.length; i++) {
-                hash = ((hash << 5) - hash) + combinedInput.charCodeAt(i);
-                hash |= 0;
-              }
-              tokenHash = hash.toString(16);
-            }
-            
-            // Calculate completion time
-            const duration = performance.now() - startTime;
-            
-            // Return verification result
-            return {
-              tokenHash,
-              duration,
-              implementation: "chunked",
               processedAt: Date.now()
             };
           } catch (error) {
@@ -254,7 +179,7 @@ module.exports = {
    * @param {Object} testParams - Test parameters from suite
    * @returns {Object} Verification result with standardized format
    */
-  verifyResult(result, challenge, testParams) {
+  async verifyResult(result, challenge, testParams) {
     try {
       // Check if result is valid
       if (!result || result.error) {
@@ -270,14 +195,14 @@ module.exports = {
       }
       
       // Extract required data
-      const token = challenge.token;
+      const suiteId = challenge.suiteId;
       const challengeId = challenge.id;
       const timestamp = challenge.timestamp;
       const transformSeed = testParams.PARAM_TRANSFORM_SEED;
       
       // Calculate expected tokenHash using the same shared code algorithm
-      const expectedResult = sharedCode.token_verification.calculateTokenHash(
-        token, challengeId, timestamp, transformSeed
+      const expectedResult = await sharedCode.token_verification.calculateTokenHash(
+        suiteId, challengeId, timestamp, transformSeed
       );
       
       // Compare with received hash

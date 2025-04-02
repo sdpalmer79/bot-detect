@@ -2,7 +2,7 @@
 (function() {
     // Extract token from query string
     const urlParams = new URLSearchParams(window.location.search);
-    const securityToken = urlParams.get('X-Challenge-ID') || '';
+    const securityToken = urlParams.get('x-challenge-id') || '';
 
     // Collect environment data
     function collectEnvironmentData() {
@@ -213,7 +213,7 @@
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'X-Challenge-ID': securityToken
+            'x-challenge-id': securityToken
           },
           body: JSON.stringify({
             timestamp: Date.now(),
@@ -267,7 +267,7 @@
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'X-Challenge-ID': securityToken
+            'x-challenge-id': securityToken
           },
           body: JSON.stringify({
             timestamp: Date.now(),
@@ -335,7 +335,7 @@
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'X-Challenge-ID': securityToken
+            'x-challenge-id': securityToken
           },
           body: JSON.stringify({
             // Challenge identification
@@ -398,7 +398,7 @@
             method: 'GET',
             headers: {
               'Content-Type': 'application/javascript',
-              'X-Challenge-ID': securityToken
+              'x-challenge-id': securityToken
             }
           });
           

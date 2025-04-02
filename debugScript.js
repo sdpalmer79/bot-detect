@@ -41,7 +41,7 @@ async function startDebugServer(port = 3000) {
   }
   
   // Create a challenge for the test suite
-  const challenge = createChallenge(suiteCache, challengeCache);
+  createChallenge(suiteCache, challengeCache);
 
   // Create Express app
   const app = express();
@@ -64,7 +64,7 @@ async function startDebugServer(port = 3000) {
   app.post('/api/request-challenge', (req, res) => {
     
     // Log request details
-    console.log('Challenge requested:');
+    console.log('Challenge requested');
     console.log('Request headers:', req.headers);
     console.log('Request body:', JSON.stringify(req.body, null, 2));
     
@@ -72,7 +72,14 @@ async function startDebugServer(port = 3000) {
       const challenge = getAndVerifyChallenge(req, challengeCache, STATUS.CREATED);
       updateChallengeStatus(challenge, STATUS.SERVED, challengeCache);
       console.log('Sending challenge:', challenge);
-      res.json(challenge);
+      res.json({
+        id: challenge.id,
+        suiteId: challenge.suiteId,
+        suiteUrl: challenge.suiteUrl,
+        timestamp: challenge.timestamp,
+        powDifficulty: challenge.powDifficulty,
+        powPrefix: challenge.powPrefix
+      });
     } catch (error) {
       console.error("Error requesting challenge:", error);
       res.status(500).json({ error: 'Failed to create challenge' });
@@ -120,8 +127,9 @@ async function startDebugServer(port = 3000) {
 
   // API endpoint to verify captcha results
   app.post('/api/verify-captcha', async (req, res) => {
-    console.log('Verification received:');
-    console.log(JSON.stringify(req.body, null, 2));
+    console.log('Verification received');
+    console.log('Request headers:', req.headers);
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
 
     let challenge; // Define challenge in the outer scope
     try {
@@ -226,7 +234,8 @@ async function startDebugServer(port = 3000) {
 
   // API endpoint to verify interactive captcha results
   app.post('/api/verify-interactive-captcha', async (req, res) => {
-    console.log('Interactive verification received:');
+    console.log('Interactive verification received');
+    console.log('Request headers:', req.headers);
     console.log(JSON.stringify(req.body, null, 2));
 
     let originalChallenge; // Define in outer scope for cleanup

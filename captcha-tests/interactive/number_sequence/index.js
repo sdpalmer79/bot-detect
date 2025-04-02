@@ -351,7 +351,7 @@ module.exports = {
       // Create and add the sequence image
       const sequenceImage = document.createElement('img');
       // Access imageUrl directly from params
-      sequenceImage.src = {{PARAM_IMAGE_BASE_URL}} + clientParams.imageUrl; 
+      sequenceImage.src = PARAM_IMAGE_BASE_URL + clientParams.imageUrl; 
       sequenceImage.alt = 'Number sequence puzzle';
       sequenceImage.style.cssText = 'max-width: 100%; height: auto; display: inline-block;';
       imageContainer.appendChild(sequenceImage);

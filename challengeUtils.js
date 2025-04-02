@@ -1,11 +1,12 @@
 const { v4: uuidv4 } = require('uuid');
 const captchaTests = require('./captcha-tests');
+const crypto = require('crypto');
 
 const MAX_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_CHALLENGE_AGE, 5 * 60 * 1000);
 const MAX_INTERACTIVE_CHALLENGE_AGE = parseEnvNumber(process.env.MAX_INTERACTIVE_CHALLENGE_AGE, 3 * 60 * 1000); // 3 minutes default
 const CHALLENGE_POW_DIFFICULTY = parseEnvNumber(process.env.CHALLENGE_POW_DIFFICULTY, 2);
 const INTERACTIVE_CHALLENGE_THRESHOLD = parseEnvNumber(process.env.INTERACTIVE_CHALLENGE_THRESHOLD, 0.6);
-const CHALLENGE_ID_HEADER = 'X-Challenge-ID';
+const CHALLENGE_ID_HEADER = 'x-challenge-id';
 
 // Challenge Statuses
 const STATUS = {
@@ -171,7 +172,7 @@ function updateChallengeStatus(challenge, newStatus, challengeCache, details = {
 
 function createChallenge(suiteCache, challengeCache) {
   const suiteData = assignTestSuite(suiteCache);
-  const challengeId = uuidv4();
+  const challengeId = 'test1234' //uuidv4();
   const now = Date.now();
   const challenge = {
     id: challengeId,
@@ -407,9 +408,9 @@ async function verifyAutoTests(submission, challenge, suiteData) {
  */
 function verifyProofOfWork(submission) {
   console.log('Verifying proof of work...');
-  const powValid = submission.challengeSolution.powResult && 
-                submission.challengeSolution.powResult.hash && 
-                submission.challengeSolution.powResult.hash.startsWith('00');
+  const powValid = submission.autoResults.powResult && 
+                submission.autoResults.powResult.hash && 
+                submission.autoResults.powResult.hash.startsWith('00');
 
   if (!powValid) {
     throw new CaptchaError('INVALID_PROOF_OF_WORK', {
@@ -454,19 +455,19 @@ async function evaluateAutomaticTests(submission, challenge, suiteData) {
     }
 
     // Check if the test result exists in the submission
-    if (!submission.challengeSolution?.testResults || 
-        !submission.challengeSolution.testResults.hasOwnProperty(testInfo.id)) {
+    if (!submission.autoResults?.testResults || 
+        !submission.autoResults.testResults.hasOwnProperty(testInfo.id)) {
       throw new CaptchaError('MISSING_TEST_RESULT', {
         message: `Missing test result for test ${testInfo.originalId} (ID: ${testInfo.id})`,
         details: {
           testId: testInfo.id,
           originalTestId: testInfo.originalId,
-          availableResults: Object.keys(submission.challengeSolution?.testResults || {})
+          availableResults: Object.keys(submission.autoResults?.testResults || {})
         }
       });
     }
 
-    const result = submission.challengeSolution.testResults[testInfo.id];
+    const result = submission.autoResults.testResults[testInfo.id];
     
     // Retrieve the parameters used for this specific test instance from suiteData
     // These act as the 'verificationParams' for automatic tests in this context
