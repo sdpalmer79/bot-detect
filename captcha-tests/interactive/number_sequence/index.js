@@ -14,9 +14,10 @@ const os = require('os');
 
 // Set up fonts directory - look for fonts in local location
 const fontsDir = path.join(__dirname, 'fonts');
+let fontFiles;
 if (fs.existsSync(fontsDir)) {
   // Register custom fonts if available
-  const fontFiles = fs.readdirSync(fontsDir).filter(file => file.endsWith('.ttf'));
+  fontFiles = fs.readdirSync(fontsDir).filter(file => file.endsWith('.ttf'));
   fontFiles.forEach(font => {
     registerFont(path.join(fontsDir, font), { family: path.basename(font, '.ttf') });
   });
@@ -68,10 +69,10 @@ function generateSequenceImage(sequenceValues, distortionParams, challengeId, op
   }
   
   // Use the bundled fonts in for rendering
-  let availableFonts = fontFiles.map(font => path.basename(font, '.ttf'));
+  let availableFonts = fontFiles?.map(font => path.basename(font, '.ttf'));
 
   // No bundled fonts - Attempt to build a list of available fonts
-  if (availableFonts.length === 0) {
+  if (!availableFonts || availableFonts.length === 0) {
     const systemFontFallbacks = [
         'sans-serif',       // Should be available everywhere
         'monospace',        // Should be available everywhere
@@ -242,21 +243,22 @@ function generateSequenceImage(sequenceValues, distortionParams, challengeId, op
   }
   
   // Save image to file
+  const buffer = canvas.toBuffer('image/jpeg', { quality: 0.9 });
+
+  // Convert buffer to Base64 Data URI
+  const base64Image = buffer.toString('base64');
+  const dataUri = `data:image/jpeg;base64,${base64Image}`;
+
+  // Save the file for debugging/logging purposes
   const imageFileName = `seq-${challengeId}.jpg`;
   const imagePath = path.join(imagesDir, imageFileName);
-  
-  // Save the image
-  const buffer = canvas.toBuffer('image/jpeg', { quality: 0.9 });
   fs.writeFileSync(imagePath, buffer);
-  
-  // For web access, return a relative path from suite directory
-  const relativeImagePath = `/images/${imageFileName}`;
-  
+
   return {
-    path: imagePath,
-    relativePath: relativeImagePath,
+    path: imagePath, // Keep original path for reference if needed
     width,
-    height
+    height,
+    dataUri
   };
 }
 
@@ -350,8 +352,8 @@ module.exports = {
       
       // Create and add the sequence image
       const sequenceImage = document.createElement('img');
-      // Access imageUrl directly from params
-      sequenceImage.src = PARAM_IMAGE_BASE_URL + clientParams.imageUrl; 
+      // Access imageDataUri directly from params
+      sequenceImage.src = clientParams.imageDataUri;
       sequenceImage.alt = 'Number sequence puzzle';
       sequenceImage.style.cssText = 'max-width: 100%; height: auto; display: inline-block;';
       imageContainer.appendChild(sequenceImage);
@@ -428,15 +430,29 @@ module.exports = {
       container.addEventListener('mousemove', trackMouseMovement);
       
       // Attach to DOM - Assuming containerId is passed within clientParams
-      const challengeContainer = document.getElementById(clientParams.containerId || 'captcha-graphic'); 
+      const challengeContainer = document.getElementById(clientParams.containerId || 'captcha-graphic');
       if (challengeContainer) {
-        challengeContainer.appendChild(container);
+        // Make the container visible before adding the challenge UI
+        challengeContainer.style.display = 'block';
+
+        // Clear any previous content (optional but good practice)
+        challengeContainer.innerHTML = '';
+        challengeContainer.appendChild(container); // Append the new UI
+
+        // Optionally hide the initial status/loading message container if separate
+        const statusContainer = document.getElementById('captcha-status'); // Or 'captcha-tests'
+        if (statusContainer) {
+            statusContainer.style.display = 'none';
+        }
+
       } else {
         console.error('CAPTCHA container element not found:', clientParams.containerId || 'captcha-graphic');
         // Optionally append to body as a fallback, though this might break layout
-        // document.body.appendChild(container); 
+        // document.body.appendChild(container);
+        // If appending to body, ensure it's visible
+        container.style.display = 'block'; // Make sure the challenge itself is visible if appended elsewhere
       }
-      
+
       return new Promise((resolve) => {
         // Handle option selection
         choicesContainer.addEventListener('click', (e) => {
@@ -521,10 +537,8 @@ module.exports = {
    * Declares the parameters this test accepts
    */
   getParameterDefinitions() {
-    return {
-      // Parameter for image URL prefix
-      "PARAM_IMAGE_BASE_URL": "" // Empty string default - will be set during suite generation
-    };
+    // No external parameters needed
+    return {};
   },
 
   /**
@@ -704,62 +718,98 @@ module.exports = {
     }
     
     // Generate wrong answers for multiple choice
-    // For arithmetic, use increments off by 1-3
-    // For geometric, use ratios off by 1
     const wrongAnswers = [];
-    const numberOfChoices = Math.min(3 + difficulty, 6); // 4 to 6 choices depending on difficulty
-    
-    while (wrongAnswers.length < numberOfChoices - 1) {
+    const numberOfChoices = Math.min(3 + difficulty, 6); // 4 to 6 choices
+    const requiredWrongAnswers = numberOfChoices - 1;
+    let attempts = 0; // Safeguard counter
+    const maxAttempts = 100; // Limit attempts to prevent infinite loops
+
+    while (wrongAnswers.length < requiredWrongAnswers && attempts < maxAttempts) {
       let wrongAnswer;
       if (isArithmetic) {
-        const wrongIncrement = sequenceParams.increment + 
-                             [-3, -2, -1, 1, 2, 3][Math.floor(seededRandom(6))];
+        // Ensure wrongIncrement is never 0
+        let offsetIndex = Math.floor(seededRandom(6));
+        let offset = [-3, -2, -1, 1, 2, 3][offsetIndex];
+        // Ensure the wrong increment is different from the correct one
+        while (sequenceParams.increment + offset === sequenceParams.increment) {
+             offsetIndex = (offsetIndex + 1) % 6; // Try next offset
+             offset = [-3, -2, -1, 1, 2, 3][offsetIndex];
+        }
+        const wrongIncrement = sequenceParams.increment + offset;
         wrongAnswer = sequenceValues[4] + wrongIncrement;
       } else {
-        const wrongRatio = sequenceParams.ratio +
-                         [-1, -0.5, 0.5, 1][Math.floor(seededRandom(4))];
+        // Ensure wrongRatio is never 0 and different from the correct ratio
+        let offsetIndex = Math.floor(seededRandom(4));
+        let offset = [-1, -0.5, 0.5, 1][offsetIndex];
+         while (sequenceParams.ratio + offset === sequenceParams.ratio || sequenceParams.ratio + offset === 0) {
+             offsetIndex = (offsetIndex + 1) % 4; // Try next offset
+             offset = [-1, -0.5, 0.5, 1][offsetIndex];
+         }
+        const wrongRatio = sequenceParams.ratio + offset;
         wrongAnswer = Math.round(sequenceValues[4] * wrongRatio);
       }
-      
+
       // Ensure we don't accidentally include the correct answer
       // and don't duplicate wrong answers
       if (wrongAnswer !== correctAnswer && !wrongAnswers.includes(wrongAnswer)) {
         wrongAnswers.push(wrongAnswer);
       }
+      attempts++; // Increment attempt counter
     }
-    
+
+    // Check if we failed to generate enough unique wrong answers
+    if (wrongAnswers.length < requiredWrongAnswers) {
+        console.warn(`Could not generate enough unique wrong answers for challenge ${options.challengeId}. Required: ${requiredWrongAnswers}, Generated: ${wrongAnswers.length}. Difficulty: ${difficulty}, Type: ${isArithmetic ? 'Arithmetic' : 'Geometric'}`);
+        // Fallback: Fill remaining slots with simple variations if possible
+        let fallbackValue = correctAnswer > 10 ? correctAnswer - 1 : correctAnswer + numberOfChoices;
+        while(wrongAnswers.length < requiredWrongAnswers) {
+            if (!wrongAnswers.includes(fallbackValue) && fallbackValue !== correctAnswer) {
+                wrongAnswers.push(fallbackValue);
+            }
+            // Ensure the fallback value changes to avoid infinite loop here too
+            fallbackValue += (seededRandom() < 0.5 ? 1 : -1);
+            // Basic check to prevent runaway fallbacks
+            if (fallbackValue === correctAnswer || fallbackValue < -1000 || fallbackValue > 10000) {
+                 fallbackValue = Math.round(seededRandom(100)); // Reset if stuck
+            }
+        }
+    }
+
+
     // Generate the sequence image
     const imageInfo = generateSequenceImage(
       sequenceValues,
       distortionParams,
       options.challengeId,
-      { 
+      {
         suiteId: options.suiteId || crypto.randomBytes(8).toString('hex')
       }
     );
-    
+
     // Generate all possible answers (correct + wrong) for client-side
     const allAnswers = [correctAnswer, ...wrongAnswers];
-    
+
     // Return standardized challenge parameters structure
     return {
-      // Standard metadata
-      challengeId: options.challengeId,
       
       // Client-side parameters (public)
       clientParams: {
-        imageUrl: imageInfo.relativePath,
-        imageWidth: imageInfo.width,
-        imageHeight: imageInfo.height,
         answerOptions: allAnswers, // All possible answers without indicating which is correct
+        imageDataUri: imageInfo.dataUri // Data URI for client-side rendering
       },
-      
+
       // Verification parameters (private, server-side only)
       verificationParams: {
         correctAnswer,
         sequenceType: sequenceParams.type,
         sequenceParams,
-        difficulty
+        difficulty,
+      },
+
+      additionalMetadata: {
+        imageWidth: imageInfo.width,
+        imageHeight: imageInfo.height,
+        imageUrl: imageInfo.path,
       }
     };
   },

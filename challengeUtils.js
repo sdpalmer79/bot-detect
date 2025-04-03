@@ -361,8 +361,7 @@ function selectInteractiveTest(botProbability, challenge, suiteData) {
   return {
     testId: selectedTestInfo.id, // Use the unique ID assigned in the suite
     originalTestId: selectedTestInfo.originalId, // Keep original ID for reference
-    clientParams: generatedParams.clientParams,
-    verificationParams: generatedParams.verificationParams // Keep verification params separate
+    ...generatedParams
   };
 }
 
