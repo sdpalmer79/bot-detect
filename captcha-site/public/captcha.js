@@ -338,8 +338,6 @@
             'x-challenge-id': securityToken
           },
           body: JSON.stringify({
-            // Challenge identification
-            challengeId: challenge.id,
             timestamp: Date.now(),   
             
             // Results from interactive challenge

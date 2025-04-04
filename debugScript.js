@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { buildSuites } = require('./build-test-suite/src/build');
 const { createChallenge, getAndVerifyChallenge, verifyAutoTests, updateChallengeStatus, STATUS, CaptchaError } = require('./challengeUtils');
+const captchaTests = require('./captcha-tests');
 
 const suiteCache = new Map();
 const challengeCache = new Map();
